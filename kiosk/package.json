@@ -1,0 +1,24 @@
+{
+  "name": "infoklas-kiosk",
+  "version": "1.0.0",
+  "description": "ІнфоКлас — кіоск-клієнт (Lockdown) для учнівських комп'ютерів",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "ua.school.infoklas.kiosk",
+    "productName": "InfoKlas Kiosk",
+    "files": ["main.js", "preload.js", "lock.html", "setup.html"],
+    "win": { "target": "nsis" },
+    "nsis": { "perMachine": true, "oneClick": false, "allowToChangeInstallationDirectory": false }
+  }
+}

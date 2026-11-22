@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8"><title>Комп'ютер заблоковано</title>
+<style>
+  body { margin: 0; height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #1d2433, #3b5bdb);
+    color: #fff; font: 18px system-ui, "Segoe UI", sans-serif; user-select: none; }
+  .box { text-align: center; } .ic { font-size: 6rem; } h1 { font-size: 2.6rem; margin: .2em 0; } .pc { opacity: .8; font-size: 1.3rem; }
+  input { font: 700 2rem ui-monospace, Consolas, monospace; letter-spacing: 8px; text-align: center; width: 260px; padding: 12px; border-radius: 12px; border: none; margin-top: 30px; }
+  button { font: inherit; padding: 12px 26px; border-radius: 12px; border: none; background: #ffd43b; font-weight: 700; cursor: pointer; margin-left: 8px; }
+  #err { color: #ffa8a8; min-height: 1.5em; margin-top: 12px; } .hint { opacity: .65; font-size: .9rem; margin-top: 30px; }
+</style></head>
+<body><div class="box">
+  <div class="ic">🔒</div>
+  <h1>Комп'ютер заблоковано</h1>
+  <div class="pc" id="pc"></div>
+  <form id="f"><input id="code" inputmode="numeric" maxlength="6" placeholder="код" autofocus autocomplete="off"><button>Розблокувати</button></form>
+  <div id="err"></div>
+  <div class="hint">Розблокувати комп'ютер може лише вчитель — одноразовим кодом або зі свого робочого місця.</div>
+</div>
+<script>
+  document.getElementById('pc').textContent = "Комп'ютер №" + new URLSearchParams(location.search).get('pc');
+  document.getElementById('f').onsubmit = async e => {
+    e.preventDefault();
+    const c = document.getElementById('code');
+    const r = await window.kiosk.unlock(c.value);
+    if (!r.ok) { document.getElementById('err').textContent = r.error; c.value = ''; c.focus(); }
+  };
+  setInterval(() => document.getElementById('code').focus(), 2000);
+</script></body></html>

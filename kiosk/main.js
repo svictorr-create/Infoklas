@@ -1,0 +1,206 @@
+'use strict';
+/*
+ * ІнфоКлас — кіоск-клієнт (Lockdown) для учнівських комп'ютерів.
+ *
+ * Що робить:
+ *  - стартує разом з Windows і ЗАВЖДИ після перезавантаження показує екран блокування;
+ *  - розблокувати можна лише одноразовим кодом вчителя (онлайн) або офлайн-кодом (HOTP), чи командою з панелі вчителя;
+ *  - під час «Презентації», «Мого екрана» та «Увага!» вікно займає весь екран, завжди поверх інших і повертає фокус;
+ *  - під час уроку закриває заборонені програми (браузери, ігри — список задає вчитель);
+ *  - у режимі практичної — дозволяє інші програми, а крок інструкції показує маленьким вікном поверх усіх вікон;
+ *  - робить знімок екрана, коли учень тисне «Я закінчив».
+ */
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const { execFile } = require('child_process');
+const { io } = require('socket.io-client');
+
+if (!app.requestSingleInstanceLock()) app.quit();
+
+const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
+let cfg = {};
+try { cfg = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')); } catch {}
+const saveCfg = () => fs.writeFileSync(CFG_FILE, JSON.stringify(cfg, null, 2));
+
+let win = null;          // основне вікно (веб-застосунок або екран блокування)
+let locked = true;       // після старту — завжди заблоковано
+let layout = 'locked';   // locked | work | panel
+let labMode = 'none';    // режим уроку від сервера
+let allowQuit = false;
+let blockedApps = [];
+let socket = null;
+
+// ---------- HOTP для офлайн-розблокування ----------
+function hotp(secretHex, counter) {
+  const buf = Buffer.alloc(8); buf.writeBigUInt64BE(BigInt(counter));
+  const h = crypto.createHmac('sha1', Buffer.from(secretHex, 'hex')).update(buf).digest();
+  const o = h[h.length - 1] & 0xf;
+  const code = ((h[o] & 0x7f) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
+  return String(code % 1e6).padStart(6, '0');
+}
+
+async function post(url, body) {
+  const r = await fetch(cfg.server + url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(6000) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(d.error || 'Помилка'), { server: true });
+  return d;
+}
+
+// ---------- Вікно ----------
+function createWindow() {
+  win = new BrowserWindow({
+    show: false, frame: false, fullscreen: true, kiosk: true, alwaysOnTop: true, skipTaskbar: true,
+    autoHideMenuBar: true, closable: false, minimizable: false, backgroundColor: '#1d2433',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false, devTools: !app.isPackaged },
+  });
+  win.on('close', e => { if (!allowQuit) e.preventDefault(); });
+  win.on('blur', () => { if (mustHoldFocus()) setTimeout(() => { win.show(); win.focus(); win.moveTop(); }, 50); });
+  win.on('minimize', e => { if (mustHoldFocus()) { e.preventDefault(); win.restore(); } });
+  // Блокуємо небезпечні клавіші всередині вікна
+  win.webContents.on('before-input-event', (e, i) => {
+    const k = i.key.toLowerCase();
+    if ((i.control && ['w', 'r', 'n', 't', 'p'].includes(k) && !i.shift) || k === 'f5' || k === 'f11' || k === 'f12' || (i.control && i.shift && k === 'i') || (i.alt && k === 'f4')) e.preventDefault();
+  });
+  // Навігація лише в межах сервера школи
+  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:') && !url.startsWith(cfg.server || '#')) e.preventDefault(); });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith(cfg.server)) return { action: 'allow', overrideBrowserWindowOptions: { alwaysOnTop: layout !== 'work', autoHideMenuBar: true } };
+    if (labMode === 'work' || labMode === 'none') shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.once('ready-to-show', () => win.show());
+}
+const mustHoldFocus = () => locked || ['demo', 'screen', 'lock'].includes(labMode);
+
+function showLock() {
+  locked = true; layout = 'locked';
+  applyFull();
+  win.loadFile(path.join(__dirname, 'lock.html'), { query: { pc: String(cfg.computer_no || '?') } });
+  socket?.emit('device:locked', true);
+}
+function showApp() {
+  locked = false;
+  win.loadURL(cfg.server + '/#/');
+  applyLayout(['demo', 'screen', 'lock'].includes(labMode) ? 'locked' : 'work');
+  socket?.emit('device:locked', false);
+}
+
+function applyFull() {
+  win.setKiosk(true); win.setFullScreen(true); win.setAlwaysOnTop(true, 'screen-saver'); win.setSkipTaskbar(true);
+  win.setResizable(false); win.show(); win.focus();
+}
+function applyLayout(l) {
+  if (locked) { applyFull(); return; }
+  if (['demo', 'screen', 'lock'].includes(labMode)) l = 'locked'; // вчитель тримає увагу — учень не може вийти
+  layout = l;
+  if (l === 'locked') return applyFull();
+  win.setKiosk(false); win.setFullScreen(false); win.setSkipTaskbar(false); win.setResizable(true);
+  const wa = screen.getPrimaryDisplay().workArea;
+  if (l === 'panel') {
+    // Крок інструкції поверх усіх вікон — у правому верхньому куті
+    win.setAlwaysOnTop(true, 'floating');
+    win.setBounds({ x: wa.x + wa.width - 400, y: wa.y + 10, width: 390, height: 250 });
+  } else if (l === 'hide-for-shot') {
+    win.hide();
+  } else {
+    win.setAlwaysOnTop(false);
+    win.setBounds(wa); win.show();
+  }
+}
+
+// ---------- Зв'язок з сервером ----------
+function connect() {
+  socket = io(cfg.server, { auth: { deviceKey: cfg.key }, transports: ['websocket', 'polling'], reconnection: true });
+  socket.on('connect', async () => {
+    socket.emit('device:locked', locked);
+    try {
+      const r = await fetch(`${cfg.server}/api/device/state?key=${cfg.key}`).then(r => r.json());
+      blockedApps = r.blocked_apps || []; labMode = r.mode || 'none';
+      if (!locked) applyLayout(layout);
+    } catch {}
+  });
+  socket.on('device:lock', () => showLock());
+  socket.on('device:unlock', () => { if (locked) showApp(); });
+  socket.on('device:exit', () => { allowQuit = true; app.quit(); });
+  socket.on('policy', p => { blockedApps = p.blocked_apps || []; });
+  socket.on('lab:mode', m => {
+    labMode = m.mode || 'none';
+    if (locked) return;
+    applyLayout(['demo', 'screen', 'lock'].includes(labMode) ? 'locked' : (layout === 'locked' ? 'work' : layout));
+  });
+}
+
+// ---------- Заборонені програми (Windows) ----------
+function enforceApps() {
+  if (process.platform !== 'win32' || !blockedApps.length) return;
+  if (!locked && labMode === 'none') return; // поза уроком ПК вільний
+  execFile('tasklist', ['/fo', 'csv', '/nh'], { windowsHide: true }, (err, out) => {
+    if (err) return;
+    const running = new Set(out.split('\n').map(l => (l.split('","')[0] || '').replace(/"/g, '').trim().toLowerCase()).filter(Boolean));
+    for (const name of blockedApps) {
+      if (running.has(name)) {
+        execFile('taskkill', ['/f', '/im', name], { windowsHide: true }, () => {});
+        socket?.emit('device:killed', name);
+      }
+    }
+  });
+}
+
+// ---------- IPC з веб-застосунком та екраном блокування ----------
+ipcMain.on('kiosk:info-sync', e => { e.returnValue = cfg.computer_no || null; });
+ipcMain.handle('kiosk:info', () => ({ computerNo: cfg.computer_no, server: cfg.server }));
+ipcMain.handle('kiosk:capture', async () => {
+  const { width, height } = screen.getPrimaryDisplay().size;
+  const scale = Math.min(1, 1600 / width);
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(width * scale), height: Math.round(height * scale) } });
+  const img = sources[0]?.thumbnail;
+  return img ? 'data:image/jpeg;base64,' + img.toJPEG(75).toString('base64') : null;
+});
+ipcMain.on('kiosk:layout', (e, l) => {
+  if (l === 'hide-for-shot') { win.hide(); return; }
+  if (l === 'locked') return applyLayout('locked');
+  if (layout === 'hide-for-shot' || !win.isVisible()) win.show();
+  applyLayout(l);
+});
+ipcMain.handle('kiosk:unlock', async (e, code) => {
+  code = String(code || '').trim();
+  try {
+    const r = await post('/api/device/unlock', { key: cfg.key, code });
+    if (r.counter) cfg.counter = Math.max(cfg.counter || 0, r.counter), saveCfg();
+    if (r.kind === 'exit') { allowQuit = true; setTimeout(() => app.quit(), 300); return { ok: true }; }
+    showApp(); return { ok: true };
+  } catch (err) {
+    if (err.server) return { ok: false, error: err.message };
+    // Немає зв'язку — перевіряємо офлайн-код (HOTP) локально
+    const from = (cfg.counter || 0) + 1;
+    for (let i = from; i < from + 30; i++) {
+      if (hotp(cfg.hotp_secret, i) === code) { cfg.counter = i; saveCfg(); showApp(); return { ok: true, offline: true }; }
+    }
+    return { ok: false, error: 'Немає зв\'язку з сервером, а офлайн-код невірний' };
+  }
+});
+ipcMain.handle('kiosk:register', async (e, d) => {
+  try {
+    cfg.server = d.server.replace(/\/+$/, '');
+    const r = await post('/api/device/register', { login: d.login, password: d.password, computer_no: d.computer_no, name: require('os').hostname() });
+    Object.assign(cfg, { key: r.key, hotp_secret: r.hotp_secret, computer_no: r.computer_no, counter: 0 });
+    saveCfg();
+    connect(); showLock();
+    return { ok: true };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+
+// ---------- Старт ----------
+app.whenReady().then(() => {
+  if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: true }); // автозапуск з Windows
+  // Перехоплюємо системні комбінації, які можна перехопити (Alt+Tab/Ctrl+Alt+Del — див. README про політики Windows)
+  ['CommandOrControl+Esc', 'Alt+F4', 'F11', 'CommandOrControl+Shift+Esc'].forEach(k => { try { globalShortcut.register(k, () => {}); } catch {} });
+  createWindow();
+  if (!cfg.key || !cfg.server) win.loadFile(path.join(__dirname, 'setup.html'));
+  else { connect(); showLock(); }
+  setInterval(enforceApps, 4000);
+});
+app.on('before-quit', e => { if (!allowQuit) e.preventDefault(); });
+app.on('window-all-closed', () => { if (allowQuit) app.quit(); });

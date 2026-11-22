@@ -168,6 +168,8 @@ function setSetting(key, value) {
 
 // ---------- Секрет і перший запуск ----------
 if (!setting('secret')) setSetting('secret', crypto.randomBytes(32).toString('hex'));
+// Міграція: кількість комп'ютерів зберігається окремо для кожного уроку
+if (!all("PRAGMA table_info(sessions)").some(c => c.name === 'computers')) db.exec('ALTER TABLE sessions ADD COLUMN computers INTEGER');
 if (setting('computers') == null) setSetting('computers', 10);
 if (setting('blocked_apps') == null) {
   setSetting('blocked_apps', ['chrome.exe', 'msedge.exe', 'firefox.exe', 'opera.exe', 'browser.exe',

@@ -372,9 +372,12 @@ app.get('/api/sessions', auth, teacher, h(req => all(`SELECT s.*, l.title lesson
 
 app.post('/api/sessions', auth, teacher, h(req => {
   const { class_id, lesson_id } = req.body;
+  const computers = parseInt(req.body.computers, 10);
+  if (!(computers >= 1 && computers <= 60)) bad("Вкажіть, скільки комп'ютерів працює на цьому уроці (1–60)");
+  setSetting('computers', computers); // запам'ятовуємо як підказку для наступного разу
   // Комп'ютерний клас один — завершуємо інші активні заняття
   for (const s of all("SELECT id FROM sessions WHERE status='active'")) endSession(s.id);
-  const id = run("INSERT INTO sessions(class_id,lesson_id,date,status,mode) VALUES(?,?,?,'active','work')", class_id, lesson_id, U.today()).lastInsertRowid;
+  const id = run("INSERT INTO sessions(class_id,lesson_id,date,status,mode,computers) VALUES(?,?,?,'active','work',?)", class_id, lesson_id, U.today(), computers).lastInsertRowid;
   const lesson = get('SELECT title FROM lessons WHERE id=?', lesson_id);
   io.to('class:' + class_id).emit('session', { id, lesson_id, mode: 'work', title: lesson?.title });
   io.to('devices').emit('lab:mode', { mode: 'work', session_id: id });
@@ -428,9 +431,20 @@ app.get('/api/sessions/:id/live', auth, teacher, h(req => {
     JOIN steps st ON st.id=h.step_id WHERE h.session_id=? ORDER BY h.status='open' DESC, h.id DESC`, s.id);
   for (const r of help) r.existing = explanationsFor(r.step_id, null);
   const finishes = all(`SELECT sb.*, u.name FROM submissions sb JOIN users u ON u.id=sb.student_id WHERE sb.session_id=? AND sb.kind='finish' ORDER BY sb.id DESC`, s.id);
-  return { session: s, lesson, students, help, finishes, computers: setting('computers', 10) };
+  return { session: s, lesson, students, help, finishes, computers: s.computers || setting('computers', 10) };
 }));
 
+// Змінити кількість комп'ютерів посеред уроку (зламався ПК тощо)
+app.put('/api/sessions/:id/computers', auth, teacher, h(req => {
+  const n = parseInt(req.body.computers, 10);
+  if (!(n >= 1 && n <= 60)) bad('Кількість має бути від 1 до 60');
+  run('UPDATE sessions SET computers=? WHERE id=?', n, req.params.id);
+  setSetting('computers', n);
+  // учні, що сиділи за ПК з номером більше n, стають «не розсадженими»
+  const moved = run('DELETE FROM seating WHERE session_id=? AND computer_no>?', req.params.id, n).changes;
+  pushSeating(get('SELECT * FROM sessions WHERE id=?', req.params.id));
+  return { ok: true, unseated: moved };
+}));
 app.put('/api/sessions/:id/attendance', auth, teacher, h(req => {
   const { student_id, status } = req.body;
   if (status) run('INSERT INTO attendance(session_id,student_id,status) VALUES(?,?,?) ON CONFLICT(session_id,student_id) DO UPDATE SET status=excluded.status', req.params.id, student_id, status);
@@ -448,7 +462,7 @@ app.post('/api/sessions/:id/seating/auto', auth, teacher, h(req => {
   const s = get('SELECT * FROM sessions WHERE id=?', req.params.id);
   let ids = all("SELECT student_id FROM attendance WHERE session_id=? AND status<>'absent'", s.id).map(r => r.student_id);
   if (!ids.length) ids = studentsOf(s.class_id).map(x => x.id);
-  const plan = autoSeat(s.id, ids, req.body.computers || setting('computers', 10));
+  const plan = autoSeat(s.id, ids, s.computers || setting('computers', 10));
   tx(() => {
     run('DELETE FROM seating WHERE session_id=?', s.id);
     for (const p of plan) run('INSERT INTO seating(session_id,student_id,computer_no,role,was_driver) VALUES(?,?,?,?,?)', s.id, p.student_id, p.computer_no, p.role, p.role === 'driver' ? 1 : 0);

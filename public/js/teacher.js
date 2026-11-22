@@ -80,14 +80,21 @@ async function startLessonDialog(classId) {
   const cls = classes.find(c => c.id === classId);
   if (!cls.course_id) return toast('Спершу призначте класу курс', 'err');
   const [course, sessions] = await Promise.all([api('/courses/' + cls.course_id), api('/sessions?class_id=' + classId)]);
+  const lastPcs = (await api('/settings')).computers;
   const held = new Set(sessions.filter(s => s.status === 'done').map(s => s.lesson_id));
   const firstNew = course.units.flatMap(u => u.lessons).find(l => !held.has(l.id));
   const m = modal(`<h3>▶ Почати урок — ${esc(cls.name)}</h3>
     <label>Урок<select id="ls">${course.units.map(u => `<optgroup label="${esc(u.title)}">${u.lessons.map(l => `<option value="${l.id}" ${firstNew?.id === l.id ? 'selected' : ''}>${held.has(l.id) ? '✓ ' : ''}${esc(l.title)}</option>`).join('')}</optgroup>`).join('')}</select></label>
     <p class="hint">✓ — уже проводився з цим класом.</p>
+    <label>💻 Скільки комп'ютерів для учнів працює сьогодні?
+      <input type="number" id="pcs" min="1" max="60" required placeholder="напр. 10" style="font-size:1.3em;font-weight:700;max-width:160px"></label>
+    <p class="hint">Минулого разу: <b>${lastPcs}</b>. Від цього залежить розсадка.</p>
     <div class="row"><button class="btn primary big" id="go">▶ Почати</button><button class="btn ghost" id="miss">🚨 Записати урок, що не відбувся</button></div>`);
+  $('#pcs', m.el).focus();
   $('#go', m.el).onclick = async () => {
-    const r = await api('/sessions', { body: { class_id: classId, lesson_id: +$('#ls', m.el).value } });
+    const pcs = parseInt($('#pcs', m.el).value, 10);
+    if (!(pcs >= 1 && pcs <= 60)) { toast("Вкажіть кількість комп'ютерів", 'err'); $('#pcs', m.el).focus(); return; }
+    const r = await api('/sessions', { body: { class_id: classId, lesson_id: +$('#ls', m.el).value, computers: pcs } });
     m.close(); location.hash = '#/live/' + r.id;
   };
   $('#miss', m.el).onclick = async () => {
@@ -322,6 +329,7 @@ async function livePage(id) {
     </div>
     ${active ? `<div class="toolbar">
       <button class="btn" id="allp">✅ Усі присутні</button>
+      <button class="btn" id="pcn" title="Змінити кількість комп'ютерів">💻 ПК: <b id="pcn-v">${L.computers}</b></button>
       <button class="btn" id="seat">🔀 Розсадити автоматично</button>
       <button class="btn" id="rot">🔄 Поміняти ролі</button>
       <button class="btn" id="unl">🔓 Розблокувати ПК</button>
@@ -348,6 +356,7 @@ async function livePage(id) {
     const byPc = {};
     for (const st of L.students) if (st.seat) (byPc[st.seat.computer_no] ||= []).push(st);
     const n = Math.max(L.computers, ...Object.keys(byPc).map(Number), 0);
+    if ($('#pcn-v')) $('#pcn-v').textContent = L.computers;
     let html = '';
     for (let pc = 1; pc <= n; pc++) {
       const g = (byPc[pc] || []).sort((a, b) => (b.seat.role === 'driver') - (a.seat.role === 'driver'));
@@ -440,9 +449,14 @@ async function livePage(id) {
   if (active) {
     $('#allp').onclick = async () => { await api(`/sessions/${id}/attendance/all`, { body: { status: 'present' } }); refresh(); };
     $('#seat').onclick = async () => {
-      const n = prompt(`Скільки комп'ютерів працює сьогодні?`, L.computers); if (!n) return;
-      await api(`/sessions/${id}/seating/auto`, { body: { computers: +n } });
+      await api(`/sessions/${id}/seating/auto`, { body: {} });
       toast('Розсаджено: за клавіатуру — ті, хто найменше працював руками; групи змішані за рівнем.', 'ok', 6000); refresh();
+    };
+    $('#pcn').onclick = async () => {
+      const n = prompt(`Скільки комп'ютерів працює зараз?`, L.computers); if (!n) return;
+      const r = await put(`/sessions/${id}/computers`, { computers: +n });
+      toast(r.unseated ? `Тепер ПК: ${n}. ${r.unseated} учн. без місця — натисніть «Розсадити» або перетягніть їх.` : `Тепер ПК: ${n}`, 'ok', 6000);
+      refresh();
     };
     $('#rot').onclick = async () => { await api(`/sessions/${id}/seating/rotate`, { body: {} }); toast('Ролі змінено — учні побачать сповіщення'); refresh(); };
     $('#unl').onclick = async () => { await api('/devices/command', { body: { cmd: 'unlock' } }); toast('Команду розблокування надіслано всім ПК'); };
@@ -697,7 +711,7 @@ async function settingsPage() {
   const s = await api('/settings');
   const main = shellFn(`<h1>⚙️ Налаштування</h1>
     <section class="card"><h3>Комп'ютерний клас</h3>
-      <label>Кількість комп'ютерів для учнів<input type="number" id="pcs" min="1" max="60" value="${s.computers}"></label>
+      <label>Кількість комп'ютерів (лише підказка — система питає щоразу, коли ви починаєте урок)<input type="number" id="pcs" min="1" max="60" value="${s.computers}"></label>
       <label>Заборонені програми (кіоск закриває їх під час уроку; по одній назві процесу в рядку)<textarea id="ba" rows="6" class="mono">${esc(s.blocked_apps.join('\n'))}</textarea></label>
       <label>Термін дії одноразового коду, хв<input type="number" id="ttl" value="${s.unlock_ttl}"></label>
       <button class="btn primary" id="sv">Зберегти</button></section>

@@ -333,6 +333,7 @@ async function livePage(id) {
       <button class="btn" id="seat">🔀 Розсадити автоматично</button>
       <button class="btn" id="rot">🔄 Поміняти ролі</button>
       <button class="btn" id="unl">🔓 Розблокувати ПК</button>
+      <span class="hint" id="kiosk-sum"></span>
       <span class="spacer"></span>
       <button class="btn danger ghost" id="alarm">🚨 Тривога — перервати</button>
       <button class="btn primary" id="end">🏁 Завершити урок</button>
@@ -357,6 +358,8 @@ async function livePage(id) {
     for (const st of L.students) if (st.seat) (byPc[st.seat.computer_no] ||= []).push(st);
     const n = Math.max(L.computers, ...Object.keys(byPc).map(Number), 0);
     if ($('#pcn-v')) $('#pcn-v').textContent = L.computers;
+    const ks = Object.values(L.kiosks || {});
+    if ($('#kiosk-sum') && ks.length) $('#kiosk-sum').textContent = `Кіоск запущено: ${ks.filter(x => x.online).length} з ${ks.length} ПК`;
     let html = '';
     for (let pc = 1; pc <= n; pc++) {
       const g = (byPc[pc] || []).sort((a, b) => (b.seat.role === 'driver') - (a.seat.role === 'driver'));
@@ -365,8 +368,9 @@ async function livePage(id) {
       const helpOpen = L.help.filter(h => h.status === 'open' && (h.computer_no === pc || g.some(st => st.id === h.student_id))).length;
       const fin = g.some(st => st.finished?.finished_at);
       const lost = g.some(st => st.focusLost);
+      const k = L.kiosks?.[pc];
       html += `<div class="pc ${g.length ? '' : 'empty'} ${on ? 'on' : ''} ${helpOpen ? 'help' : ''} ${fin ? 'fin' : ''} ${lost ? 'lost' : ''}" data-pc="${pc}">
-        <div class="pc-top"><b>ПК ${pc}</b><span>${on ? '🟢' : '⚪'}${helpOpen ? ' 🙋' : ''}${fin ? ' ✅' : ''}${lost ? ' ⚠️' : ''}</span></div>
+        <div class="pc-top"><b>ПК ${pc}</b><span>${k ? (k.online ? `<span title="Кіоск запущено${k.locked ? ', заблоковано' : ''}">${k.locked ? '🔒' : '🖥'}</span> ` : '<span title="Кіоск не запущено" class="off">🖥</span> ') : ''}${on ? '🟢' : '⚪'}${helpOpen ? ' 🙋' : ''}${fin ? ' ✅' : ''}${lost ? ' ⚠️' : ''}</span></div>
         <div class="chips">${g.map(st => chip(st)).join('') || '<span class="muted small">вільний</span>'}</div>
         ${g.length && total ? `<div class="progress thin"><div style="width:${prog / total * 100}%"></div></div><div class="small muted">${prog}/${total}${prog < total && L.lesson.steps[prog] ? ' · ' + esc(L.lesson.steps[prog].text.replace(/[*`#!\[\]]/g, '').slice(0, 40)) : ''}</div>` : ''}
       </div>`;
@@ -460,7 +464,7 @@ async function livePage(id) {
     };
     $('#rot').onclick = async () => { await api(`/sessions/${id}/seating/rotate`, { body: {} }); toast('Ролі змінено — учні побачать сповіщення'); refresh(); };
     $('#unl').onclick = async () => { await api('/devices/command', { body: { cmd: 'unlock' } }); toast('Команду розблокування надіслано всім ПК'); };
-    $('#end').onclick = async () => { if (!confirm('Завершити урок? Хто не відмічений — буде записаний як відсутній.')) return; stopScreenShare(); await api(`/sessions/${id}/end`, { body: {} }); render(); };
+    $('#end').onclick = async () => { if (!confirm('Завершити урок? Хто не відмічений — буде записаний як відсутній.' + (L.closeKiosk ? '\nКіоски на всіх ПК закриються.' : ''))) return; stopScreenShare(); await api(`/sessions/${id}/end`, { body: {} }); render(); };
     $('#alarm').onclick = async () => {
       const reason = prompt('Причина', 'Повітряна тривога'); if (reason === null) return;
       stopScreenShare(); await api(`/sessions/${id}/cancel`, { body: { reason } });
@@ -676,7 +680,12 @@ async function devicesPage() {
   const [devs, codes, logins] = await Promise.all([api('/devices'), api('/unlock-codes'), api('/logins')]);
   const main = shellFn(`
     <div class="page-head"><h1>🔒 Комп'ютери класу (Lockdown)</h1>
-      <div class="row"><button class="btn" id="lockall">🔒 Заблокувати всі</button><button class="btn" id="unlockall">🔓 Розблокувати всі</button></div></div>
+      <div class="row"><button class="btn" id="lockall">🔒 Заблокувати всі</button><button class="btn" id="unlockall">🔓 Розблокувати всі</button><button class="btn" id="exitall">⏏ Закрити кіоск на всіх</button></div></div>
+    <section class="card"><h3>▶ Запуск кіоску через Veyon</h3>
+      <p class="muted">Veyon → виділіть комп'ютери → <b>«Запустити програму»</b> і вставте команду (збережіть її у Veyon, щоб наступного разу обрати зі списку):</p>
+      <p>Windows: <code>"C:\Program Files\InfoKlas Kiosk\InfoKlas Kiosk.exe" --open</code></p>
+      <p>Linux Mint: <code>infoklas-kiosk --open</code></p>
+      <p class="hint"><code>--open</code> — учні одразу бачать вхід. Без нього кіоск стартує заблокованим, і ви розблоковуєте ПК звідси чи з уроку. Після «Завершити урок» кіоски закриваються самі (вимикається в ⚙️).</p></section>
     <section class="card">
       <h3>Одноразовий код розблокування</h3>
       <p class="muted">Після перезавантаження ПК кіоск-клієнт блокує екран. Учень не може його обійти — розблокувати можна лише кодом від вчителя або кнопкою тут.</p>
@@ -686,9 +695,9 @@ async function devicesPage() {
     </section>
     <section class="card"><h3>Зареєстровані ПК</h3>
       <table class="tbl"><thead><tr><th>ПК</th><th>Стан</th><th>Зв'язок</th><th></th></tr></thead><tbody>
-      ${devs.map(d => `<tr><td><b>ПК ${d.computer_no}</b> <small class="muted">${esc(d.name || '')}</small></td><td>${d.locked ? '🔒 заблокований' : '🔓 відкритий'}</td>
+      ${devs.map(d => `<tr><td><b>ПК ${d.computer_no}</b> <small class="muted">${esc(d.name || '')}</small></td><td>${!d.online ? '— не запущено' : d.locked ? '🔒 заблокований' : '🔓 відкритий'}</td>
         <td>${d.online ? '🟢 онлайн' : '⚪ ' + (d.last_seen ? fmtDate(d.last_seen, true) : '—')}</td>
-        <td class="row-actions"><button class="btn sm" data-cmd="lock" data-id="${d.id}">🔒</button><button class="btn sm" data-cmd="unlock" data-id="${d.id}">🔓</button>
+        <td class="row-actions"><button class="btn sm" data-cmd="lock" data-id="${d.id}">🔒</button><button class="btn sm" data-cmd="unlock" data-id="${d.id}">🔓</button><button class="btn sm" data-cmd="exit" data-id="${d.id}" title="Закрити кіоск">⏏</button>
         <button class="btn sm ghost" data-off="${d.id}" title="Код, що працює без інтернету">📴 офлайн-код</button><button class="btn sm ghost" data-deld="${d.id}">🗑</button></td></tr>`).join('') || '<tr><td colspan=4 class="muted">Ще немає. Встановіть кіоск-клієнт на ПК (див. README → «Кіоск»).</td></tr>'}
       </tbody></table></section>
     <section class="card"><h3>Журнал входів учнів</h3>
@@ -700,6 +709,7 @@ async function devicesPage() {
   };
   $('#gen').onclick = () => gen('unlock'); $('#genx').onclick = () => gen('exit');
   $('#lockall').onclick = async () => { await api('/devices/command', { body: { cmd: 'lock' } }); toast('Заблоковано'); render(); };
+  $('#exitall').onclick = async () => { if (!confirm('Закрити кіоск на всіх комп\'ютерах?')) return; await api('/devices/command', { body: { cmd: 'exit' } }); toast('Кіоски закриваються'); setTimeout(render, 1500); };
   $('#unlockall').onclick = async () => { await api('/devices/command', { body: { cmd: 'unlock' } }); toast('Розблоковано'); render(); };
   $$('[data-cmd]', main).forEach(b => b.onclick = async () => { await api('/devices/command', { body: { cmd: b.dataset.cmd, ids: [+b.dataset.id] } }); render(); });
   $$('[data-off]', main).forEach(b => b.onclick = async () => { const r = await api(`/devices/${b.dataset.off}/offline-code`, { body: {} }); modal(`<h3>Офлайн-код для ПК ${r.computer_no}</h3><div class="pw-big">${r.code}</div><p class="muted">Працює навіть без інтернету, один раз.</p>`); });
@@ -714,13 +724,14 @@ async function settingsPage() {
       <label>Кількість комп'ютерів (лише підказка — система питає щоразу, коли ви починаєте урок)<input type="number" id="pcs" min="1" max="60" value="${s.computers}"></label>
       <label>Заборонені програми (кіоск закриває їх під час уроку; по одній назві процесу в рядку; Windows — <code>chrome.exe</code>, Linux — <code>chrome</code>, <code>firefox</code>)<textarea id="ba" rows="6" class="mono">${esc(s.blocked_apps.join('\n'))}</textarea></label>
       <label>Термін дії одноразового коду, хв<input type="number" id="ttl" value="${s.unlock_ttl}"></label>
+      <label class="switch"><input type="checkbox" id="cke" ${s.close_kiosk_on_end ? 'checked' : ''}> Закривати кіоск на всіх ПК після «Завершити урок» (комп'ютери звільняються для інших вчителів)</label><br><br>
       <button class="btn primary" id="sv">Зберегти</button></section>
     <section class="card"><h3>Номер цього комп'ютера (для входу з браузера без кіоску)</h3>
       <p class="muted">Відкрийте цю сторінку на кожному учнівському ПК один раз і вкажіть номер. Тоді система знатиме, хто за яким комп'ютером.</p>
       <div class="row"><input id="pcno" type="number" placeholder="напр. 5" value="${esc(localStorage.getItem('pcNo') || '')}"><button class="btn" id="svpc">Зберегти для цього браузера</button><button class="btn ghost" id="clpc">Це не класний ПК</button></div></section>
     <section class="card"><h3>Пароль вчителя</h3>
       <div class="row wrap"><input type="password" id="op" placeholder="Старий пароль"><input type="password" id="np" placeholder="Новий пароль"><button class="btn" id="cp">Змінити</button></div></section>`, '#/settings');
-  $('#sv').onclick = async () => { await put('/settings', { computers: +$('#pcs').value, blocked_apps: $('#ba').value.split('\n'), unlock_ttl: +$('#ttl').value }); toast('Збережено'); };
+  $('#sv').onclick = async () => { await put('/settings', { computers: +$('#pcs').value, blocked_apps: $('#ba').value.split('\n'), unlock_ttl: +$('#ttl').value, close_kiosk_on_end: $('#cke').checked }); toast('Збережено'); };
   $('#svpc').onclick = () => { localStorage.setItem('pcNo', $('#pcno').value); toast('Цей браузер тепер — ПК ' + $('#pcno').value); };
   $('#clpc').onclick = () => { localStorage.removeItem('pcNo'); $('#pcno').value = ''; toast('Номер ПК очищено'); };
   $('#cp').onclick = async () => { await api('/me/password', { body: { old: $('#op').value, password: $('#np').value } }); toast('Пароль змінено'); };

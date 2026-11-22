@@ -390,6 +390,13 @@ function endSession(id) {
   for (const st of studentsOf(s.class_id)) run("INSERT OR IGNORE INTO attendance(session_id,student_id,status) VALUES(?,?,'absent')", id, st.id);
   io.to('class:' + s.class_id).emit('session', null);
   io.to('devices').emit('lab:mode', { mode: 'none' });
+  closeKiosksAfterLesson();
+}
+// Кіоск запускається вручну (через Veyon) — після уроку закриваємо його на всіх ПК, щоб звільнити їх для інших вчителів
+function closeKiosksAfterLesson() {
+  if (!setting('close_kiosk_on_end', true)) return;
+  for (const id of deviceSockets.keys()) expectedExit.add(id);
+  io.to('devices').emit('device:exit');
 }
 app.post('/api/sessions/:id/end', auth, teacher, h(req => { endSession(+req.params.id); return { ok: true }; }));
 // Урок зірвано/не відбувся (повітряна тривога тощо) — фіксуємо, прогрес не втрачається
@@ -398,6 +405,7 @@ app.post('/api/sessions/:id/cancel', auth, teacher, h(req => {
   run("UPDATE sessions SET status='cancelled', cancel_reason=?, mode='work', ended_at=CURRENT_TIMESTAMP WHERE id=?", req.body.reason || 'Повітряна тривога', s.id);
   io.to('class:' + s.class_id).emit('session', null);
   io.to('devices').emit('lab:mode', { mode: 'none' });
+  closeKiosksAfterLesson();
   for (const st of studentsOf(s.class_id)) notifyStudent(st.id, `Урок «${get('SELECT title FROM lessons WHERE id=?', s.lesson_id)?.title}» не завершено (${req.body.reason || 'тривога'}). Можна виконати вдома — прогрес збережено.`, `#/lesson/${s.lesson_id}`);
   return { ok: true };
 }));
@@ -431,7 +439,8 @@ app.get('/api/sessions/:id/live', auth, teacher, h(req => {
     JOIN steps st ON st.id=h.step_id WHERE h.session_id=? ORDER BY h.status='open' DESC, h.id DESC`, s.id);
   for (const r of help) r.existing = explanationsFor(r.step_id, null);
   const finishes = all(`SELECT sb.*, u.name FROM submissions sb JOIN users u ON u.id=sb.student_id WHERE sb.session_id=? AND sb.kind='finish' ORDER BY sb.id DESC`, s.id);
-  return { session: s, lesson, students, help, finishes, computers: s.computers || setting('computers', 10) };
+  const kiosks = Object.fromEntries(all('SELECT id, computer_no, locked FROM devices').map(d => [d.computer_no, { online: deviceSockets.has(d.id), locked: !!d.locked }]));
+  return { session: s, lesson, students, help, finishes, kiosks, closeKiosk: setting('close_kiosk_on_end', true), computers: s.computers || setting('computers', 10) };
 }));
 
 // Змінити кількість комп'ютерів посеред уроку (зламався ПК тощо)
@@ -779,11 +788,12 @@ app.post('/api/notifications/read', auth, h(req => { run('UPDATE notifications S
 // ======================================================================
 // Налаштування, кіоск-пристрої, коди розблокування
 // ======================================================================
-app.get('/api/settings', auth, teacher, h(() => ({ computers: setting('computers', 10), blocked_apps: setting('blocked_apps', []), unlock_ttl: setting('unlock_ttl', 15) })));
+app.get('/api/settings', auth, teacher, h(() => ({ computers: setting('computers', 10), blocked_apps: setting('blocked_apps', []), unlock_ttl: setting('unlock_ttl', 15), close_kiosk_on_end: setting('close_kiosk_on_end', true) })));
 app.put('/api/settings', auth, teacher, h(req => {
   const b = req.body;
   if (b.computers != null) setSetting('computers', Math.max(1, Math.min(60, parseInt(b.computers, 10) || 1)));
   if (Array.isArray(b.blocked_apps)) { setSetting('blocked_apps', b.blocked_apps.map(s => s.trim().toLowerCase()).filter(Boolean)); io.to('devices').emit('policy', { blocked_apps: setting('blocked_apps') }); }
+  if (b.close_kiosk_on_end != null) setSetting('close_kiosk_on_end', !!b.close_kiosk_on_end);
   if (b.unlock_ttl != null) setSetting('unlock_ttl', Math.max(1, parseInt(b.unlock_ttl, 10) || 15));
   return { ok: true };
 }));
@@ -795,6 +805,7 @@ app.post('/api/devices/command', auth, teacher, h(req => {
   const targets = ids?.length ? ids : all('SELECT id FROM devices').map(d => d.id);
   for (const id of targets) {
     if (cmd === 'lock' || cmd === 'unlock') run('UPDATE devices SET locked=? WHERE id=?', cmd === 'lock' ? 1 : 0, id);
+    if (cmd === 'exit') expectedExit.add(id);
     io.to('device:' + id).emit('device:' + cmd);
   }
   return { ok: true, count: targets.length };
@@ -836,6 +847,7 @@ app.post('/api/device/unlock', h(req => {
   if (c && !c.used_at && c.expires_at > new Date().toISOString()) {
     run('UPDATE unlock_codes SET used_at=CURRENT_TIMESTAMP, used_by=? WHERE code=?', 'ПК ' + d.computer_no, code);
     run('UPDATE devices SET locked=0 WHERE id=?', d.id);
+    if (c.kind === 'exit') expectedExit.add(d.id);
     notifyTeachers(`🔓 ПК ${d.computer_no} розблоковано одноразовим кодом${c.kind === 'exit' ? ' (сервісний вихід)' : ''}`);
     return { ok: true, kind: c.kind };
   }
@@ -866,6 +878,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 // ======================================================================
 const online = new Map();        // userId -> Map(socketId -> {pc})
 const deviceSockets = new Map(); // deviceId -> socketId
+const expectedExit = new Set();   // кіоски, які закрито за командою вчителя (не тривога)
 
 io.use((socket, next) => {
   const dk = socket.handshake.auth?.deviceKey;
@@ -885,10 +898,19 @@ io.on('connection', socket => {
   if (socket.device) {
     const d = socket.device;
     deviceSockets.set(d.id, socket.id);
+    expectedExit.delete(d.id);
     socket.join('devices'); socket.join('device:' + d.id);
     run('UPDATE devices SET last_seen=CURRENT_TIMESTAMP WHERE id=?', d.id);
     io.to('teacher').emit('devices:changed');
-    socket.on('disconnect', () => { if (deviceSockets.get(d.id) === socket.id) deviceSockets.delete(d.id); io.to('teacher').emit('devices:changed'); });
+    socket.on('disconnect', () => {
+      if (deviceSockets.get(d.id) === socket.id) deviceSockets.delete(d.id);
+      io.to('teacher').emit('devices:changed');
+      // Учень закрив кіоск / вимкнув чи перезавантажив ПК посеред уроку? (15 с — на випадок короткого збою мережі)
+      setTimeout(() => {
+        if (deviceSockets.has(d.id) || expectedExit.has(d.id)) return;
+        if (get("SELECT 1 FROM sessions WHERE status='active'")) notifyTeachers(`⚠️ ПК ${d.computer_no}: кіоск зник під час уроку (закрито, перезавантаження або немає мережі)`);
+      }, 15000);
+    });
     socket.on('device:locked', locked => { run('UPDATE devices SET locked=? WHERE id=?', locked ? 1 : 0, d.id); io.to('teacher').emit('devices:changed'); });
     socket.on('device:killed', name => io.to('teacher').emit('notify', { text: `⛔ ПК ${d.computer_no}: закрито заборонену програму ${name}` }));
     return;

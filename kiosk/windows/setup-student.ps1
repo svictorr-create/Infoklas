@@ -3,20 +3,26 @@
   Запуск: правою кнопкою на PowerShell → «Запустити від імені адміністратора», потім:
 
     Set-ExecutionPolicy -Scope Process Bypass -Force
-    .\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.0.0.exe" -AutoLogin
+    .\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.0.0.exe"
+
+  Кіоск НЕ стартує сам: вчитель запускає його через Veyon → «Запустити програму»:
+    "C:\Program Files\InfoKlas Kiosk\InfoKlas Kiosk.exe" --open
+  Додаткові параметри:  -AutoLogin  (Windows одразу входить в обліковий запис учня)
+                        -AutoStart  (кіоск запускається сам під час входу учня, заблокованим)
 
   Що робить:
    1. тихо встановлює кіоск-клієнт;
    2. створює локальний обліковий запис учня "uchen" (звичайний користувач, НЕ адміністратор);
    3. для учня вимикає: Диспетчер задач, командний рядок, редактор реєстру, Панель керування,
       «Виконати…», блокування та зміну пароля (Ctrl+Alt+Del);
-   4. ховає «Змінити користувача»; додає кіоск в автозапуск учня;
-   5. з -AutoLogin — Windows одразу входить в обліковий запис учня, і кіоск блокує екран.
+   4. ховає «Змінити користувача»;
+   5. з -AutoLogin — Windows одразу входить в обліковий запис учня; з -AutoStart — кіоск стартує сам.
 #>
 param(
   [string]$Installer = "",
   [string]$Student = "uchen",
-  [switch]$AutoLogin
+  [switch]$AutoLogin,
+  [switch]$AutoStart
 )
 $ErrorActionPreference = "Stop"
 
@@ -78,8 +84,10 @@ try {
   Set-Reg $exp "NoRun" 1                     # Win+R
   Set-Reg $exp "NoControlPanel" 1            # Панель керування і Параметри
   Set-Reg "$root\Software\Policies\Microsoft\Windows\System" "DisableCMD" 1   # командний рядок
-  # Автозапуск кіоску саме для учня
-  if (Test-Path $KioskExe) { Set-Reg "$root\Software\Microsoft\Windows\CurrentVersion\Run" "InfoKlasKiosk" "`"$KioskExe`"" "String" }
+  # Автозапуск кіоску — лише за бажанням (-AutoStart); інакше прибираємо, якщо був
+  $run = "$root\Software\Microsoft\Windows\CurrentVersion\Run"
+  if ($AutoStart -and (Test-Path $KioskExe)) { Set-Reg $run "InfoKlasKiosk" "`"$KioskExe`"" "String" }
+  elseif (Test-Path $run) { Remove-ItemProperty -Path $run -Name "InfoKlasKiosk" -ErrorAction SilentlyContinue }
 } finally {
   [gc]::Collect(); Start-Sleep -Milliseconds 500
   if ($loaded) { reg unload $hive | Out-Null }
@@ -103,5 +111,6 @@ if ($AutoLogin) {
 }
 
 Write-Host ""
-Write-Host "Готово. Перезавантажте ПК. Під час першого входу учня кіоск попросить адресу сервера, номер ПК і логін вчителя." -ForegroundColor Green
+Write-Host "Готово. Перезавантажте ПК." -ForegroundColor Green
+Write-Host "Перший запуск кіоску (з Veyon) попросить адресу сервера, номер ПК і логін вчителя — це один раз."
 Write-Host "Обліковий запис адміністратора не змінено — ним ви й надалі обслуговуєте ПК."

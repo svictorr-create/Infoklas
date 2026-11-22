@@ -258,3 +258,5 @@ a.class-card { color: var(--ink); text-decoration: none; }
   .step { grid-template-columns: auto 1fr; } .step .help-btn { grid-column: 1 / 3; justify-self: end; }
   .now-card { flex-direction: column; align-items: flex-start; }
 }
+
+.pc-top .off { opacity: .25; filter: grayscale(1); }

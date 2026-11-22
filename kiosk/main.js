@@ -3,7 +3,8 @@
  * ІнфоКлас — кіоск-клієнт (Lockdown) для учнівських комп'ютерів.
  *
  * Що робить:
- *  - стартує разом з Windows і ЗАВЖДИ після перезавантаження показує екран блокування;
+ *  - запускається вручну вчителем (наприклад, Veyon → «Запустити програму»); після уроку закривається командою з сервера;
+ *  - без параметра --open стартує з екраном блокування;
  *  - розблокувати можна лише одноразовим кодом вчителя (онлайн) або офлайн-кодом (HOTP), чи командою з панелі вчителя;
  *  - під час «Презентації», «Мого екрана» та «Увага!» вікно займає весь екран, завжди поверх інших і повертає фокус;
  *  - під час уроку закриває заборонені програми (браузери, ігри — список задає вчитель);
@@ -17,12 +18,41 @@ const crypto = require('crypto');
 const platform = require('./platform');
 const { io } = require('socket.io-client');
 
-if (!app.requestSingleInstanceLock()) app.quit();
+/*
+ * Параметри запуску:
+ *   --open            одразу показати вхід учня (без коду) — зручно, коли вчитель сам запускає кіоск через Veyon
+ *   --autostart=on    вмикає автозапуск з входом у систему (--autostart=off — вимикає)
+ *   --restore-keys    лише повернути системні комбінації клавіш (Linux) і вийти — запускається при вході учня в систему
+ */
+const ARGS = process.argv.slice(1);
+const hasArg = a => ARGS.includes(a);
+const START_OPEN = hasArg('--open');
 
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
 let cfg = {};
 try { cfg = JSON.parse(fs.readFileSync(CFG_FILE, 'utf8')); } catch {}
 const saveCfg = () => fs.writeFileSync(CFG_FILE, JSON.stringify(cfg, null, 2));
+
+// Якщо кіоск минулого разу завершився аварійно (вимкнули світло), клавіші в Linux лишилися б вимкненими
+// і для уроків інших вчителів. Цей режим лише повертає їх і виходить.
+if (hasArg('--restore-keys')) {
+  if (cfg.keysBackup?.saved) { cfg.keysBackup = platform.restoreShortcuts(cfg.keysBackup); saveCfg(); }
+  app.exit(0);
+}
+const autostartArg = ARGS.find(a => a.startsWith('--autostart='));
+if (autostartArg) {
+  app.whenReady().then(() => { platform.setAutostart(app, autostartArg.endsWith('=on')); app.exit(0); });
+}
+
+if (!autostartArg && !hasArg('--restore-keys')) {
+  if (!app.requestSingleInstanceLock()) app.exit(0);
+  // Повторна команда з Veyon не запускає другу копію, а показує вже відкрите вікно
+  app.on('second-instance', (e, argv) => {
+    if (!win) return;
+    win.show(); win.focus();
+    if (argv.includes('--open') && locked && cfg.key) showApp();
+  });
+}
 
 let win = null;          // основне вікно (веб-застосунок або екран блокування)
 let locked = true;       // після старту — завжди заблоковано
@@ -201,13 +231,12 @@ ipcMain.handle('kiosk:register', async (e, d) => {
 });
 
 // ---------- Старт ----------
-app.whenReady().then(() => {
-  if (app.isPackaged) platform.setAutostart(app); // автозапуск з Windows / Linux
+if (!autostartArg && !hasArg('--restore-keys')) app.whenReady().then(() => {
   // Перехоплюємо системні комбінації, які можна перехопити (Alt+Tab/Ctrl+Alt+Del — див. README про політики Windows)
   ['CommandOrControl+Esc', 'Alt+F4', 'F11', 'CommandOrControl+Shift+Esc'].forEach(k => { try { globalShortcut.register(k, () => {}); } catch {} });
   createWindow();
   if (!cfg.key || !cfg.server) win.loadFile(path.join(__dirname, 'setup.html'));
-  else { connect(); showLock(); }
+  else { connect(); if (START_OPEN) showApp(); else showLock(); }
   setInterval(enforceApps, 4000);
 });
 app.on('before-quit', e => { if (!allowQuit) e.preventDefault(); else holdKeys(false); });

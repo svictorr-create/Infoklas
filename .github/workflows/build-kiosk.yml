@@ -1,0 +1,35 @@
+# Автоматична збірка інсталяторів кіоску: Windows (.exe) і Linux Mint (.deb)
+# Запуск: вкладка Actions → "Збірка кіоску" → Run workflow. Готові файли — у розділі Artifacts.
+name: Збірка кіоску
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            cmd: npx electron-builder --win nsis --x64 --publish never
+            files: kiosk/dist/*.exe
+            name: infoklas-kiosk-windows
+          - os: ubuntu-latest
+            cmd: npx electron-builder --linux deb --x64 --publish never
+            files: kiosk/dist/*.deb
+            name: infoklas-kiosk-linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: kiosk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: ${{ matrix.cmd }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.files }}

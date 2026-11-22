@@ -174,7 +174,7 @@ async function studentProfile(id) {
       <section class="card"><h3>Оцінки</h3>${d.grades.map(g => `<div class="grade-row"><span class="grade">${esc(g.value)}</span> ${esc(g.kind)} ${g.lesson_title ? '— ' + esc(g.lesson_title) : ''} <small class="muted">${fmtDate(g.created_at)} ${esc(g.comment)}</small></div>`).join('') || '<p class="muted">немає</p>'}</section>
       <section class="card"><h3>Відвідування</h3><table class="tbl compact">${d.attendance.map(a => `<tr><td>${fmtDate(a.date)}</td><td>${esc(a.title || '')}</td><td>${{ present: '✅ був', late: '⏰ запізнився', absent: '❌ відсутній' }[a.status]}</td></tr>`).join('') || '<tr><td class="muted">немає записів</td></tr>'}</table></section>
       <section class="card"><h3>Де сидів і з ким</h3><table class="tbl compact">${d.seats.map(s => `<tr><td>${fmtDate(s.date)}</td><td>ПК ${s.computer_no}</td><td>${s.was_driver ? '⌨️ за клавіатурою' : '🧭 штурман'}</td><td class="muted">${esc(s.mates || 'сам')}</td></tr>`).join('') || '<tr><td class="muted">немає</td></tr>'}</table></section>
-      <section class="card"><h3>Входи в систему</h3><table class="tbl compact">${d.logins.map(l => `<tr><td>${fmtDate(l.at, true)}</td><td>${l.place === 'home' ? '🏠 вдома' : '🏫 ПК ' + l.computer_no}</td><td class="muted">${esc(l.client)} ${esc(l.ip || '')}</td></tr>`).join('')}</table></section>
+      <section class="card"><h3>Входи в систему</h3><table class="tbl compact">${d.logins.map(l => `<tr><td>${fmtDate(l.at, true)}</td><td>${l.place === 'home' ? '🏠 вдома' : '🏫 ПК ' + l.computer_no + (l.host ? ' · ' + esc(l.host) : '')}</td><td class="muted">${esc(l.client)} ${esc(l.ip || '')}</td></tr>`).join('')}</table></section>
     </div>`, '#/');
   $$('[data-cell]', main).forEach(a => a.onclick = e => { e.preventDefault(); const l = d.lessons.find(x => x.id === +a.dataset.cell); cellDialog({ id: d.student.id, name: d.student.name }, l, l.status, d.grades.filter(g => g.lesson_id === l.id), render); });
 }
@@ -370,7 +370,7 @@ async function livePage(id) {
       const lost = g.some(st => st.focusLost);
       const k = L.kiosks?.[pc];
       html += `<div class="pc ${g.length ? '' : 'empty'} ${on ? 'on' : ''} ${helpOpen ? 'help' : ''} ${fin ? 'fin' : ''} ${lost ? 'lost' : ''}" data-pc="${pc}">
-        <div class="pc-top"><b>ПК ${pc}</b><span>${k ? (k.online ? `<span title="Кіоск запущено${k.locked ? ', заблоковано' : ''}">${k.locked ? '🔒' : '🖥'}</span> ` : '<span title="Кіоск не запущено" class="off">🖥</span> ') : ''}${on ? '🟢' : '⚪'}${helpOpen ? ' 🙋' : ''}${fin ? ' ✅' : ''}${lost ? ' ⚠️' : ''}</span></div>
+        <div class="pc-top"><b>ПК ${pc}${k?.name ? `<small class="host" title="Ім'я комп'ютера в Windows/Linux">${esc(k.name)}</small>` : ''}</b><span>${k ? (k.online ? `<span title="Кіоск запущено${k.locked ? ', заблоковано' : ''}">${k.locked ? '🔒' : '🖥'}</span> ` : '<span title="Кіоск не запущено" class="off">🖥</span> ') : ''}${on ? '🟢' : '⚪'}${helpOpen ? ' 🙋' : ''}${fin ? ' ✅' : ''}${lost ? ' ⚠️' : ''}</span></div>
         <div class="chips">${g.map(st => chip(st)).join('') || '<span class="muted small">вільний</span>'}</div>
         ${g.length && total ? `<div class="progress thin"><div style="width:${prog / total * 100}%"></div></div><div class="small muted">${prog}/${total}${prog < total && L.lesson.steps[prog] ? ' · ' + esc(L.lesson.steps[prog].text.replace(/[*`#!\[\]]/g, '').slice(0, 40)) : ''}</div>` : ''}
       </div>`;
@@ -694,15 +694,15 @@ async function devicesPage() {
       <details><summary>Останні коди</summary><table class="tbl compact">${codes.map(c => `<tr><td><code>${c.code}</code></td><td>${c.kind === 'exit' ? 'вихід' : 'розблок.'}</td><td>${c.used_at ? '✓ ' + esc(c.used_by) + ' ' + fmtDate(c.used_at, true) : new Date(c.expires_at) < new Date() ? 'прострочений' : 'діє'}</td></tr>`).join('')}</table></details>
     </section>
     <section class="card"><h3>Зареєстровані ПК</h3>
-      <table class="tbl"><thead><tr><th>ПК</th><th>Стан</th><th>Зв'язок</th><th></th></tr></thead><tbody>
-      ${devs.map(d => `<tr><td><b>ПК ${d.computer_no}</b> <small class="muted">${esc(d.name || '')}</small></td><td>${!d.online ? '— не запущено' : d.locked ? '🔒 заблокований' : '🔓 відкритий'}</td>
+      <table class="tbl"><thead><tr><th>ПК</th><th>Ім'я комп'ютера</th><th>Стан</th><th>Зв'язок</th><th></th></tr></thead><tbody>
+      ${devs.map(d => `<tr><td><b>ПК ${d.computer_no}</b></td><td><code class="host-big">${esc(d.name || '—')}</code></td><td>${!d.online ? '— не запущено' : d.locked ? '🔒 заблокований' : '🔓 відкритий'}</td>
         <td>${d.online ? '🟢 онлайн' : '⚪ ' + (d.last_seen ? fmtDate(d.last_seen, true) : '—')}</td>
         <td class="row-actions"><button class="btn sm" data-cmd="lock" data-id="${d.id}">🔒</button><button class="btn sm" data-cmd="unlock" data-id="${d.id}">🔓</button><button class="btn sm" data-cmd="exit" data-id="${d.id}" title="Закрити кіоск">⏏</button>
-        <button class="btn sm ghost" data-off="${d.id}" title="Код, що працює без інтернету">📴 офлайн-код</button><button class="btn sm ghost" data-deld="${d.id}">🗑</button></td></tr>`).join('') || '<tr><td colspan=4 class="muted">Ще немає. Встановіть кіоск-клієнт на ПК (див. README → «Кіоск»).</td></tr>'}
+        <button class="btn sm ghost" data-off="${d.id}" title="Код, що працює без інтернету">📴 офлайн-код</button><button class="btn sm ghost" data-deld="${d.id}">🗑</button></td></tr>`).join('') || '<tr><td colspan=5 class="muted">Ще немає. Встановіть кіоск-клієнт на ПК (див. README → «Кіоск»).</td></tr>'}
       </tbody></table></section>
     <section class="card"><h3>Журнал входів учнів</h3>
       <table class="tbl compact"><thead><tr><th>Час</th><th>Учень</th><th>Клас</th><th>Звідки</th><th>Клієнт</th></tr></thead><tbody>
-      ${logins.slice(0, 100).map(l => `<tr><td>${fmtDate(l.at, true)}</td><td><a href="#/student/${l.user_id}">${esc(l.name)}</a></td><td>${esc(l.class_name || '')}</td><td>${l.place === 'home' ? '🏠 поза класом' : '🏫 ПК ' + l.computer_no}</td><td class="muted">${esc(l.client)} ${esc(l.ip || '')}</td></tr>`).join('')}</tbody></table></section>`, '#/devices');
+      ${logins.slice(0, 100).map(l => `<tr><td>${fmtDate(l.at, true)}</td><td><a href="#/student/${l.user_id}">${esc(l.name)}</a></td><td>${esc(l.class_name || '')}</td><td>${l.place === 'home' ? '🏠 поза класом' : '🏫 ПК ' + l.computer_no + (l.host ? ' · ' + esc(l.host) : '')}</td><td class="muted">${esc(l.client)} ${esc(l.ip || '')}</td></tr>`).join('')}</tbody></table></section>`, '#/devices');
   const gen = async kind => {
     const r = await api('/unlock-codes', { body: { kind } });
     $('#code').innerHTML = `<div class="pw-big">${r.code}</div><p class="muted">${kind === 'exit' ? 'Закриває кіоск (обслуговування ПК).' : 'Розблоковує один ПК.'} Одноразовий, діє до ${fmtDate(r.expires_at, true)}.</p>`;

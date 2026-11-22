@@ -122,4 +122,5 @@ export function systemNotify(text) {
 }
 
 // Номер комп'ютера: з кіоску або збережений у браузері (налаштовує вчитель)
+export function pcHostname() { return state.kiosk?.hostname || ''; }
 export function pcNumber() { return state.kiosk?.computerNo || localStorage.getItem('pcNo') || ''; }

@@ -1,4 +1,4 @@
-import { state, api, $, esc, route, render, toast, beep, systemNotify, pcNumber, fmtDate } from './core.js';
+import { state, api, $, esc, route, render, toast, beep, systemNotify, pcNumber, pcHostname, fmtDate } from './core.js';
 import { registerStudent, onStudentSocket } from './student.js';
 import { registerTeacher, onTeacherSocket } from './teacher.js';
 
@@ -16,7 +16,7 @@ export function shell(html, active = '') {
       <div class="brand">💻 <span>Інфо<b>Клас</b></span></div>
       <nav>${nav.map(([h, t]) => `<a href="${h}" class="${active === h ? 'active' : ''}">${t}</a>`).join('')}</nav>
       <div class="me">
-        ${state.pc ? `<span class="pc-badge" title="Номер комп'ютера">ПК ${esc(state.pc)}</span>` : ''}
+        ${state.pc ? `<span class="pc-badge" title="Номер і ім'я комп'ютера">ПК ${esc(state.pc)}${state.pcName ? ' · ' + esc(state.pcName) : ''}</span>` : ''}
         <button class="bell" id="bell" title="Сповіщення">🔔<span id="bell-n"></span></button>
         <span class="who">${esc(u.name)}</span>
         <button class="btn ghost sm" id="logout">Вийти</button>
@@ -64,7 +64,7 @@ function loginPage() {
         <div class="login-logo">💻</div>
         <h1>Інфо<b>Клас</b></h1>
         <p class="muted">Увійди, щоб продовжити навчання</p>
-        ${pc ? `<div class="pc-big">Комп'ютер №${esc(pc)}</div>` : '<div class="pc-home">🏠 Вхід з дому або з власного пристрою</div>'}
+        ${pc ? `<div class="pc-big">Комп'ютер №${esc(pc)}${pcHostname() ? `<small>${esc(pcHostname())}</small>` : ''}</div>` : '<div class="pc-home">🏠 Вхід з дому або з власного пристрою</div>'}
         <label>Логін<input name="login" autocomplete="username" autocapitalize="off" required autofocus></label>
         <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
         <button class="btn big primary">Увійти</button>
@@ -75,7 +75,7 @@ function loginPage() {
     e.preventDefault();
     const f = new FormData(e.target);
     try {
-      await api('/login', { body: { login: f.get('login'), password: f.get('password'), pc: pcNumber() || null, client: state.kiosk ? 'kiosk' : 'web' } });
+      await api('/login', { body: { login: f.get('login'), password: f.get('password'), pc: pcNumber() || null, host: pcHostname() || null, client: state.kiosk ? 'kiosk' : 'web' } });
       document.body.className = '';
       await boot();
     } catch {}
@@ -94,7 +94,7 @@ function connectSocket() {
 async function boot() {
   try {
     const me = await api('/me');
-    state.user = me.user; state.pc = me.pc;
+    state.user = me.user; state.pc = me.pc; state.pcName = me.pcName || pcHostname() || null;
   } catch { state.user = null; }
   if (!state.user) { loginPage(); return; }
   state.kiosk?.loggedIn?.({ name: state.user.name, role: state.user.role });

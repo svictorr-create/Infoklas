@@ -168,6 +168,8 @@ function setSetting(key, value) {
 
 // ---------- Секрет і перший запуск ----------
 if (!setting('secret')) setSetting('secret', crypto.randomBytes(32).toString('hex'));
+// Міграція: ім'я комп'ютера (Windows/Linux) у журналі входів
+if (!all('PRAGMA table_info(login_log)').some(c => c.name === 'host')) db.exec('ALTER TABLE login_log ADD COLUMN host TEXT');
 // Міграція: кількість комп'ютерів зберігається окремо для кожного уроку
 if (!all("PRAGMA table_info(sessions)").some(c => c.name === 'computers')) db.exec('ALTER TABLE sessions ADD COLUMN computers INTEGER');
 if (setting('computers') == null) setSetting('computers', 10);

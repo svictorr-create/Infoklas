@@ -15,6 +15,8 @@ const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, sh
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const os = require('os');
+const HOSTNAME = os.hostname(); // ім'я комп'ютера в Windows / Linux
 const platform = require('./platform');
 const { io } = require('socket.io-client');
 
@@ -152,7 +154,7 @@ function applyLayout(l) {
 
 // ---------- Зв'язок з сервером ----------
 function connect() {
-  socket = io(cfg.server, { auth: { deviceKey: cfg.key }, transports: ['websocket', 'polling'], reconnection: true });
+  socket = io(cfg.server, { auth: { deviceKey: cfg.key, hostname: HOSTNAME }, transports: ['websocket', 'polling'], reconnection: true });
   socket.on('connect', async () => {
     socket.emit('device:locked', locked);
     try {
@@ -187,7 +189,7 @@ function enforceApps() {
 }
 
 // ---------- IPC з веб-застосунком та екраном блокування ----------
-ipcMain.on('kiosk:info-sync', e => { e.returnValue = cfg.computer_no || null; });
+ipcMain.on('kiosk:info-sync', e => { e.returnValue = { computerNo: cfg.computer_no || null, hostname: HOSTNAME }; });
 ipcMain.handle('kiosk:info', () => ({ computerNo: cfg.computer_no, server: cfg.server }));
 ipcMain.handle('kiosk:capture', async () => {
   const { width, height } = screen.getPrimaryDisplay().size;
@@ -222,7 +224,7 @@ ipcMain.handle('kiosk:unlock', async (e, code) => {
 ipcMain.handle('kiosk:register', async (e, d) => {
   try {
     cfg.server = d.server.replace(/\/+$/, '');
-    const r = await post('/api/device/register', { login: d.login, password: d.password, computer_no: d.computer_no, name: require('os').hostname() });
+    const r = await post('/api/device/register', { login: d.login, password: d.password, computer_no: d.computer_no, name: HOSTNAME });
     Object.assign(cfg, { key: r.key, hotp_secret: r.hotp_secret, computer_no: r.computer_no, counter: 0 });
     saveCfg();
     connect(); showLock();

@@ -260,3 +260,6 @@ a.class-card { color: var(--ink); text-decoration: none; }
 }
 
 .pc-top .off { opacity: .25; filter: grayscale(1); }
+.pc-top small.host { display: block; font-weight: 500; font-size: .78em; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
+.pc-big small { display: block; font-weight: 500; font-size: .75em; opacity: .75; font-family: ui-monospace, Consolas, monospace; }
+.host-big { font-size: 1em; }

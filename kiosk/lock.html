@@ -17,7 +17,8 @@
   <div class="hint">Розблокувати комп'ютер може лише вчитель — одноразовим кодом або зі свого робочого місця.</div>
 </div>
 <script>
-  document.getElementById('pc').textContent = "Комп'ютер №" + new URLSearchParams(location.search).get('pc');
+  const q = new URLSearchParams(location.search);
+  document.getElementById('pc').textContent = "Комп'ютер №" + q.get('pc') + (window.kiosk?.hostname ? ' · ' + window.kiosk.hostname : '');
   document.getElementById('f').onsubmit = async e => {
     e.preventDefault();
     const c = document.getElementById('code');

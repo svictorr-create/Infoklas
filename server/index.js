@@ -50,7 +50,7 @@ const h = fn => (req, res) => { try { const r = fn(req, res); if (r !== undefine
 const bad = msg => { throw new Error(msg); };
 
 app.post('/api/login', h((req, res) => {
-  const { login, password, pc, client } = req.body;
+  const { login, password, pc, client, host } = req.body;
   const u = get('SELECT * FROM users WHERE login=? COLLATE NOCASE', String(login || '').trim());
   if (!u || !u.active || !U.verifyPw(String(password || '').trim(), u.pw_hash)) {
     res.status(401).json({ error: 'Невірний логін або пароль' }); return;
@@ -60,13 +60,13 @@ app.post('/api/login', h((req, res) => {
   res.setHeader('Set-Cookie', `tok=${tok}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${3600 * 24 * 30}${req.secure ? '; Secure' : ''}`);
   const sess = u.role === 'student' ? activeSession(u.class_id) : null;
   const place = pcNo ? 'class' : 'home';
-  run('INSERT INTO login_log(user_id,ip,computer_no,client,place) VALUES(?,?,?,?,?)', u.id, req.ip, pcNo, client || 'web', place);
+  run('INSERT INTO login_log(user_id,ip,computer_no,client,place,host) VALUES(?,?,?,?,?,?)', u.id, req.ip, pcNo, client || 'web', place, String(host || '').slice(0, 64) || null);
   if (u.role === 'student' && sess && pcNo) studentArrived(sess, u, pcNo);
   if (u.role === 'student') io.to('teacher').emit('login', { student_id: u.id, name: u.name, pc: pcNo, at: new Date().toISOString() });
   return { ok: true, token: tok, user: { id: u.id, role: u.role, name: u.name } };
 }));
 app.post('/api/logout', (req, res) => { res.setHeader('Set-Cookie', 'tok=; Path=/; Max-Age=0'); res.json({ ok: true }); });
-app.get('/api/me', auth, h(req => ({ user: req.user, pc: req.pc, client: req.client })));
+app.get('/api/me', auth, h(req => ({ user: req.user, pc: req.pc, client: req.client, pcName: req.pc ? get('SELECT name FROM devices WHERE computer_no=?', req.pc)?.name || null : null })));
 app.post('/api/me/password', auth, teacher, h(req => {
   const { old, password } = req.body;
   const u = get('SELECT pw_hash FROM users WHERE id=?', req.user.id);
@@ -439,7 +439,7 @@ app.get('/api/sessions/:id/live', auth, teacher, h(req => {
     JOIN steps st ON st.id=h.step_id WHERE h.session_id=? ORDER BY h.status='open' DESC, h.id DESC`, s.id);
   for (const r of help) r.existing = explanationsFor(r.step_id, null);
   const finishes = all(`SELECT sb.*, u.name FROM submissions sb JOIN users u ON u.id=sb.student_id WHERE sb.session_id=? AND sb.kind='finish' ORDER BY sb.id DESC`, s.id);
-  const kiosks = Object.fromEntries(all('SELECT id, computer_no, locked FROM devices').map(d => [d.computer_no, { online: deviceSockets.has(d.id), locked: !!d.locked }]));
+  const kiosks = Object.fromEntries(all('SELECT id, computer_no, locked, name FROM devices').map(d => [d.computer_no, { online: deviceSockets.has(d.id), locked: !!d.locked, name: d.name }]));
   return { session: s, lesson, students, help, finishes, kiosks, closeKiosk: setting('close_kiosk_on_end', true), computers: s.computers || setting('computers', 10) };
 }));
 
@@ -900,7 +900,9 @@ io.on('connection', socket => {
     deviceSockets.set(d.id, socket.id);
     expectedExit.delete(d.id);
     socket.join('devices'); socket.join('device:' + d.id);
-    run('UPDATE devices SET last_seen=CURRENT_TIMESTAMP WHERE id=?', d.id);
+    // ім'я ПК оновлюється при кожному підключенні (якщо комп'ютер перейменували)
+    const host = String(socket.handshake.auth?.hostname || '').slice(0, 64);
+    run('UPDATE devices SET last_seen=CURRENT_TIMESTAMP, name=COALESCE(NULLIF(?, \'\'), name) WHERE id=?', host, d.id);
     io.to('teacher').emit('devices:changed');
     socket.on('disconnect', () => {
       if (deviceSockets.get(d.id) === socket.id) deviceSockets.delete(d.id);

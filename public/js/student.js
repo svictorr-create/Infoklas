@@ -35,6 +35,24 @@ export function onStudentSocket(s) {
     if (st) { st.explanations = (st.explanations || 0) + 1; drawSteps(); }
     showAnswer(step_id, explanation);
   });
+  // Вчитель відкриває посилання на всіх ПК (тест тощо)
+  s.on('open:url', d => {
+    if (d.pcs && !d.pcs.includes(+state.pc)) return;
+    if (state.kiosk?.openUrl) { state.kiosk.openUrl(d); toast('🔗 Вчитель відкрив: ' + (d.title || d.url), 'info', 5000); return; }
+    const w = window.open(d.url, '_blank');
+    if (w) { try { w.opener = null; } catch {} toast('🔗 Вчитель відкрив посилання в новій вкладці', 'info'); return; }
+    const m = modal(`<h3>🔗 Вчитель надіслав посилання</h3>${d.title ? `<p><b>${esc(d.title)}</b></p>` : ''}
+      <p class="muted" style="word-break:break-all">${esc(d.url)}</p>
+      <a class="btn big primary" href="${esc(d.url)}" target="_blank" rel="noopener" id="go-url">Відкрити →</a>`);
+    $('#go-url', m.el).onclick = () => setTimeout(m.close, 100);
+  });
+  s.on('url:close', d => state.kiosk?.closeUrl?.(d.id || null));
+  // Вчитель надіслав файли для роботи — копіюємо в робочу папку
+  s.on('files:new', async d => {
+    beep();
+    toast(`📂 Вчитель надіслав файли: ${d.names.join(', ')}`, 'info', 7000);
+    if (cur?.id === d.lesson_id) { await reloadLesson(); await prepareFolder(); drawWork(); }
+  });
   s.on('explanation:new', ({ lesson_id, step_id }) => {
     if (cur?.id === lesson_id) { const st = cur.steps.find(x => x.id === step_id); if (st && !$('.modal')) { reloadLesson(); } }
   });
@@ -127,6 +145,8 @@ async function lessonPage(id) {
     ${l.theory || l.materials.length ? `<details class="card" ${l.steps.some(s => s.done) ? '' : 'open'}><summary><h3>📖 Матеріали уроку</h3></summary>
       <div class="theory">${md(l.theory)}</div>
       <div class="materials">${l.materials.map(materialHtml).join('')}</div></details>` : ''}
+    ${l.links?.length ? `<section class="card"><h3>🔗 Посилання від вчителя</h3>${l.links.map(k => `<div class="link-row"><button class="btn sm" data-url="${k.id}">Відкрити</button> <b>${esc(k.title || '')}</b> <span class="muted small" style="word-break:break-all">${esc(k.url)}</span> <small class="muted">${fmtDate(k.created_at, true)}</small></div>`).join('')}</section>` : ''}
+    <section class="card" id="workbox"></section>
     <section class="card work">
       <div class="work-head">
         <h3>🛠 Практична робота</h3>
@@ -143,14 +163,20 @@ async function lessonPage(id) {
   `, '');
   $('#showall').onchange = e => { showAll = e.target.checked; localStorage.setItem('showAllSteps', showAll ? '1' : '0'); drawSteps(); };
   $('#pin').onclick = openPinned;
+  $$('[data-url]').forEach(b => b.onclick = () => {
+    const k = l.links.find(x => x.id === +b.dataset.url);
+    if (state.kiosk?.openUrl) state.kiosk.openUrl({ id: 'my-' + k.id, url: k.url, title: k.title }); else window.open(k.url, '_blank');
+  });
   drawSteps();
+  drawWork();
+  if (state.kiosk?.folder) prepareFolder().then(drawWork).catch(e => console.warn(e));
   onLeave(() => { cur = null; });
 }
 async function reloadLesson() {
   if (!cur) return;
   const id = cur.id;
   const fresh = await api('/lessons/' + id);
-  if (cur?.id === id) { cur = fresh; if (location.hash.startsWith('#/mini/')) drawMini(); else drawSteps(); }
+  if (cur?.id === id) { fresh.folderPath = cur.folderPath; cur = fresh; if (location.hash.startsWith('#/mini/')) drawMini(); else { drawSteps(); drawWork(); } }
 }
 
 function materialHtml(m) {
@@ -266,6 +292,87 @@ function showAnswer(stepId, ex) {
   });
 }
 
+// =====================================================================
+// Робоча папка: файли для роботи від вчителя + мої результати
+// =====================================================================
+const folderKey = () => ({ student: state.user.name, lesson: cur.title });
+const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : Math.max(1, Math.round(n / 1024)) + ' КБ';
+function workName(m) {
+  let n = m.title || 'файл';
+  const ext = (/\.[a-z0-9]{1,6}$/i.exec(m.url || '') || [''])[0];
+  if (!/\.[a-z0-9]{1,6}$/i.test(n) && ext) n += ext;
+  return n;
+}
+// Кіоск: створити папку й скопіювати туди файли для роботи (наявні файли не перезаписуються)
+async function prepareFolder() {
+  if (!state.kiosk?.folder || !cur) return;
+  const info = await state.kiosk.folder.info(folderKey());
+  cur.folderPath = info.path;
+  for (const m of cur.workfiles || []) {
+    const name = workName(m);
+    if (info.files.includes(name)) continue;
+    const r = await fetch(m.url, { credentials: 'same-origin' });
+    if (!r.ok) continue;
+    await state.kiosk.folder.write({ ...folderKey(), name, data: new Uint8Array(await r.arrayBuffer()) });
+  }
+}
+async function uploadResults(items, finishing) {
+  const fd = new FormData();
+  items.forEach(i => fd.append('files', i.blob || new Blob([i.data]), i.name));
+  if (finishing) fd.append('finishing', '1');
+  const r = await api(`/lessons/${cur.id}/my-files`, { body: fd });
+  cur.my_files = r.files;
+  return r;
+}
+// Кіоск: зібрати нові/змінені файли з папки й надіслати
+async function sendFolderResults(finishing) {
+  const items = await state.kiosk.folder.collect(folderKey());
+  const fresh = items.filter(i => !i.sent);
+  if (fresh.length) {
+    await uploadResults(fresh, finishing);
+    await state.kiosk.folder.markSent({ ...folderKey(), files: fresh.map(({ name, size, mtimeMs }) => ({ name, size, mtimeMs })) });
+  }
+  return fresh.length;
+}
+const pendingIds = () => (cur.my_files || []).filter(f => !f.submission_id && f.author === state.user.name).map(f => f.id);
+
+function drawWork() {
+  const box = $('#workbox'); if (!box || !cur) return;
+  const kiosk = !!state.kiosk?.folder;
+  const wf = cur.workfiles || [], mine = cur.my_files || [];
+  // не губимо файли, які учень уже вибрав у формі (розділ може оновитися, коли вчитель надсилає файли)
+  const keepForm = $('#up-form', box);
+  const keep = keepForm && keepForm.querySelector('input[type=file]').files.length ? keepForm : null;
+  const shortPath = cur.folderPath ? cur.folderPath.split(/[\\/]/).slice(-4).join(' › ') : '';
+  box.innerHTML = `<div class="work-head"><h3>📂 Моя робоча папка</h3>
+      ${kiosk ? `<button class="btn primary" id="open-folder">📂 Відкрити папку</button>` : ''}</div>
+    ${kiosk && shortPath ? `<p class="folder-path">📁 ${esc(shortPath)}</p>` : ''}
+    ${wf.length ? `<p><b>Файли для роботи</b> ${kiosk ? '<span class="muted small">— уже скопійовані у твою папку</span>' : '<span class="muted small">— завантаж і відкрий</span>'}</p>
+      <div class="files">${wf.map(m => kiosk ? `<span class="file">📄 ${esc(workName(m))}</span>` : `<a class="file" href="${esc(m.url)}" download="${esc(workName(m))}">⬇ ${esc(workName(m))}</a>`).join('')}</div>` : ''}
+    <p><b>Мої результати</b> ${mine.length ? '' : '<span class="muted small">— ще нічого не надіслано</span>'}</p>
+    ${mine.length ? `<div class="files">${mine.map(f => `<span class="file ${f.submission_id ? 'done' : ''}">${f.submission_id ? '✅' : '📤'} <a href="/api/files/${f.id}">${esc(f.name)}</a> <small>${fmtSize(f.size)}${f.author !== state.user.name ? ' · ' + esc(f.author) : ''}</small>
+      ${!f.submission_id && f.author === state.user.name ? `<button class="x" data-delfile="${f.id}" title="Прибрати">✕</button>` : ''}</span>`).join('')}</div>` : ''}
+    ${kiosk ? `<div class="row wrap"><button class="btn" id="send-folder">📤 Надіслати нові файли з папки</button></div>
+      <p class="hint">Зберігай свою роботу <b>у цю папку</b> (Файл → Зберегти як → Документи › InfoKlas). Коли натиснеш «Я закінчив», нові й змінені файли самі надійдуть вчителю.</p>`
+    : `<form id="up-form" class="row wrap"><input type="file" name="files" multiple required><button class="btn">📤 Надіслати вчителю</button></form>
+      <p class="hint">Працюєш вдома? Завантаж файли для роботи, виконай завдання і надішли результат тут.</p>`}`;
+  if (keep) $('#up-form', box)?.replaceWith(keep);
+  $('#open-folder', box)?.addEventListener('click', async () => { await prepareFolder(); state.kiosk.folder.open(folderKey()); });
+  $('#send-folder', box)?.addEventListener('click', async () => {
+    const n = await sendFolderResults(false);
+    toast(n ? `Надіслано файлів: ${n}` : 'У папці немає нових чи змінених файлів', n ? 'ok' : 'info'); drawWork();
+  });
+  $('#up-form', box)?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const files = [...e.target.files.files].map(f => ({ name: f.name, blob: f }));
+    await uploadResults(files, false); toast('Файли надіслано вчителю'); drawWork();
+  });
+  $$('[data-delfile]', box).forEach(b => b.onclick = async () => {
+    await api('/my-files/' + b.dataset.delfile, { method: 'DELETE' });
+    cur.my_files = cur.my_files.filter(f => f.id !== +b.dataset.delfile); drawWork();
+  });
+}
+
 // ---------- Завершення: самооцінювання, рефлексія, скриншот ----------
 function drawFinish() {
   const box = $('#finish'); if (!box || !cur) return;
@@ -317,16 +424,30 @@ async function finishWork(selfAssess, reflection) {
   const m = modal(`<h3>📸 Знімок екрана</h3>
     <p>${state.kiosk ? 'Зараз буде зроблено знімок екрана.' : 'Обери <b>«Весь екран»</b> у вікні, що з\'явиться — система зробить один знімок твого результату.'}</p>
     <p class="muted">Переконайся, що твоя робота (документ, програма) відкрита на екрані.</p>
+    <div id="fin-files" class="fin-files"></div>
     <div class="row"><button class="btn primary big" id="shot">📸 Зробити знімок</button>
       <label class="btn ghost">🖼 Завантажити файл<input type="file" accept="image/*" id="shotfile" hidden></label></div>
     <div id="preview"></div>`);
   let data = null;
+  // які файли піде вчителю разом із роботою
+  (async () => {
+    const box = $('#fin-files', m.el); if (!box) return;
+    let names = [];
+    if (state.kiosk?.folder) { await prepareFolder(); names = (await state.kiosk.folder.collect(folderKey())).map(i => i.name); }
+    else names = (cur.my_files || []).filter(f => !f.submission_id).map(f => f.name);
+    box.innerHTML = names.length ? `📎 Разом з роботою вчитель отримає файли: <b>${names.map(esc).join(', ')}</b>`
+      : `<span class="warn-text">⚠️ ${state.kiosk?.folder ? 'У твоїй робочій папці немає нових файлів.' : 'Ти ще не надіслав файлів з результатом.'}</span>
+         ${state.kiosk?.folder ? '<button class="btn sm" id="fin-open">📂 Відкрити папку</button> Збережи туди роботу, якщо вона є.' : 'Якщо результат — файл, надішли його в розділі «Моя робоча папка».'}`;
+    $('#fin-open', box)?.addEventListener('click', () => state.kiosk.folder.open(folderKey()));
+  })().catch(() => {});
   const showPreview = () => {
     $('#preview', m.el).innerHTML = `<img src="${data}" class="shot-prev"><button class="btn big primary" id="send">✅ Надіслати вчителю</button>`;
     $('#send', m.el).onclick = send;
   };
   const send = async () => {
-    const r = await api('/finish', { body: { lesson_id: cur.id, screenshot: data, self_assess: selfAssess, reflection } });
+    if (state.kiosk?.folder) { try { await sendFolderResults(true); } catch (e) { toast('Файли з папки не вдалося надіслати: ' + e.message, 'err'); } }
+    const r = await api('/finish', { body: { lesson_id: cur.id, screenshot: data, self_assess: selfAssess, reflection, file_ids: pendingIds() } });
+    reloadLesson().catch(() => {});
     m.close();
     toast('Роботу надіслано вчителю! 🎉', 'ok', 5000);
     cur.my = { ...cur.my, finished_at: new Date().toISOString() };

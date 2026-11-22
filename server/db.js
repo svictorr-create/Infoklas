@@ -168,6 +168,18 @@ function setSetting(key, value) {
 
 // ---------- Секрет і перший запуск ----------
 if (!setting('secret')) setSetting('secret', crypto.randomBytes(32).toString('hex'));
+db.exec(`
+-- Результати роботи учня (файли з його робочої папки)
+CREATE TABLE IF NOT EXISTS student_files (
+  id INTEGER PRIMARY KEY, student_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  lesson_id INTEGER REFERENCES lessons(id) ON DELETE CASCADE, session_id INTEGER, submission_id INTEGER,
+  name TEXT NOT NULL, stored TEXT NOT NULL, size INTEGER, group_ids TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+-- Посилання, які вчитель відкрив на комп'ютерах учнів
+CREATE TABLE IF NOT EXISTS session_links (
+  id INTEGER PRIMARY KEY, session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+  url TEXT NOT NULL, title TEXT, lock INTEGER DEFAULT 0, pcs TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, closed_at TEXT);
+`);
+fs.mkdirSync(path.join(DATA_DIR, 'uploads', 'work'), { recursive: true });
 // Міграція: ім'я комп'ютера (Windows/Linux) у журналі входів
 if (!all('PRAGMA table_info(login_log)').some(c => c.name === 'host')) db.exec('ALTER TABLE login_log ADD COLUMN host TEXT');
 // Міграція: кількість комп'ютерів зберігається окремо для кожного уроку

@@ -10,6 +10,7 @@ const { Server } = require('socket.io');
 const { all, get, run, tx, setting, setSetting, DATA_DIR } = require('./db');
 const U = require('./util');
 const { autoSeat } = require('./seating');
+const { makeZip, safeName } = require('./zip');
 
 U.setSecret(setting('secret'));
 const PORT = process.env.PORT || 3000;
@@ -141,6 +142,11 @@ function lessonStatusMap(studentIds, lessonIds, classId) {
         c.held = c.held || r.status === 'done';
       }
     }
+  }
+  // файли результатів (власні та групові)
+  for (const f of all(`SELECT f.id, f.name, f.size, f.lesson_id, f.student_id, f.group_ids FROM student_files f WHERE f.lesson_id IN (${lIn})`)) {
+    const owners = new Set([f.student_id, ...JSON.parse(f.group_ids || '[]')]);
+    for (const sid of owners) if (res[sid]?.[f.lesson_id]) (res[sid][f.lesson_id].files ||= []).push({ id: f.id, name: f.name, size: f.size });
   }
   for (const s of studentIds) for (const l of lessonIds) {
     const c = res[s][l];
@@ -295,6 +301,12 @@ app.get('/api/lessons/:id', auth, h(req => {
       l.group = all(`SELECT u.id, u.name, s.role FROM seating s JOIN users u ON u.id=s.student_id WHERE s.session_id=? AND s.computer_no=?`, sess.id, req.pc);
     }
     l.place = sess && sess.lesson_id === id && req.pc ? 'class' : 'home';
+    l.workfiles = l.materials.filter(m => m.kind === 'workfile');
+    l.materials = l.materials.filter(m => m.kind !== 'workfile');
+    l.my_files = filesFor(me, id);
+    // посилання від вчителя: поточний урок + останні уроки цього класу з цією темою
+    l.links = all(`SELECT k.id, k.url, k.title, k.lock, k.created_at FROM session_links k JOIN sessions x ON x.id=k.session_id
+      WHERE x.class_id=? AND x.lesson_id=? ORDER BY k.id DESC LIMIT 10`, req.user.class_id, id);
   }
   return l;
 }));
@@ -353,6 +365,7 @@ app.post('/api/lessons/:id/materials', auth, teacher, upload.single('file'), h(r
   const b = req.body, f = req.file;
   if (f) {
     const name = origName(f);
+    if (b.kind === 'workfile') run("DELETE FROM materials WHERE lesson_id=? AND kind='workfile' AND title=?", req.params.id, b.title || name);
     const kind = b.kind || (/pdf$/i.test(name) ? 'presentation' : f.mimetype.startsWith('video') ? 'video' : f.mimetype.startsWith('image') ? 'image' : 'file');
     return { id: run('INSERT INTO materials(lesson_id,kind,title,filename,url,mime) VALUES(?,?,?,?,?,?)', req.params.id, kind, b.title || name, f.filename, '/uploads/' + f.filename, f.mimetype).lastInsertRowid };
   }
@@ -439,8 +452,10 @@ app.get('/api/sessions/:id/live', auth, teacher, h(req => {
     JOIN steps st ON st.id=h.step_id WHERE h.session_id=? ORDER BY h.status='open' DESC, h.id DESC`, s.id);
   for (const r of help) r.existing = explanationsFor(r.step_id, null);
   const finishes = all(`SELECT sb.*, u.name FROM submissions sb JOIN users u ON u.id=sb.student_id WHERE sb.session_id=? AND sb.kind='finish' ORDER BY sb.id DESC`, s.id);
+  for (const f of finishes) f.files = all('SELECT id, name, size FROM student_files WHERE submission_id=?', f.id);
+  const links = all('SELECT * FROM session_links WHERE session_id=? ORDER BY id DESC', s.id);
   const kiosks = Object.fromEntries(all('SELECT id, computer_no, locked, name FROM devices').map(d => [d.computer_no, { online: deviceSockets.has(d.id), locked: !!d.locked, name: d.name }]));
-  return { session: s, lesson, students, help, finishes, kiosks, closeKiosk: setting('close_kiosk_on_end', true), computers: s.computers || setting('computers', 10) };
+  return { session: s, lesson, students, help, finishes, links, kiosks, closeKiosk: setting('close_kiosk_on_end', true), computers: s.computers || setting('computers', 10) };
 }));
 
 // Змінити кількість комп'ютерів посеред уроку (зламався ПК тощо)
@@ -622,7 +637,7 @@ app.delete('/api/explanations/:id', auth, teacher, h(req => { run('DELETE FROM e
 // "Я закінчив": скриншот + самооцінювання + рефлексія, сповіщення вчителю
 app.post('/api/finish', auth, h(req => {
   if (req.user.role !== 'student') bad('Лише для учнів');
-  const { lesson_id, screenshot, self_assess, reflection } = req.body;
+  const { lesson_id, screenshot, self_assess, reflection, file_ids } = req.body;
   if (!canSeeLesson(req.user, lesson_id)) bad('Немає доступу');
   const shot = saveDataUrl(screenshot);
   const sess = activeSession(req.user.class_id);
@@ -639,9 +654,133 @@ app.post('/api/finish', auth, h(req => {
   const id = run('INSERT INTO submissions(student_id,lesson_id,session_id,kind,text,file,group_ids) VALUES(?,?,?,?,?,?,?)',
     req.user.id, lesson_id, inClass ? sess.id : null, 'finish', reflection || '', shot, JSON.stringify(group.map(g => g.id))).lastInsertRowid;
   const title = get('SELECT title FROM lessons WHERE id=?', lesson_id).title;
+  let nFiles = 0;
+  for (const fid of (Array.isArray(file_ids) ? file_ids : [])) nFiles += run('UPDATE student_files SET submission_id=? WHERE id=? AND student_id=?', id, +fid, req.user.id).changes;
   io.to('teacher').emit('finish', { id, session_id: inClass ? sess.id : null, student_ids: group.map(g => g.id) });
-  notifyTeachers(`✅ ${req.pc ? 'ПК ' + req.pc + ': ' : '🏠 '}${names.join(', ')} — завершили «${title}»`, inClass ? `#/live/${sess.id}` : '#/submissions');
+  notifyTeachers(`✅ ${req.pc ? 'ПК ' + req.pc + ': ' : '🏠 '}${names.join(', ')} — завершили «${title}»${nFiles ? ` (📎 ${nFiles} файл.)` : ''}`, inClass ? `#/live/${sess.id}` : '#/submissions');
   return { ok: true, screenshot: shot };
+}));
+
+// ======================================================================
+// Робоча папка учня: файли для роботи (від вчителя) і результати (від учня)
+// ======================================================================
+const WORK = path.join(UPLOADS, 'work');
+function filesFor(studentId, lessonId) {
+  return all(`SELECT f.id, f.name, f.size, f.created_at, f.submission_id, u.name author FROM student_files f JOIN users u ON u.id=f.student_id
+    WHERE f.lesson_id=? AND (f.student_id=? OR EXISTS (SELECT 1 FROM json_each(COALESCE(f.group_ids,'[]')) WHERE value=?)) ORDER BY f.id`, lessonId, studentId, studentId);
+}
+// Учень надсилає результати (з кіоску — автоматично з робочої папки, з дому — вручну)
+app.post('/api/lessons/:id/my-files', auth, upload.array('files', 40), h(req => {
+  if (req.user.role !== 'student') bad('Лише для учнів');
+  const lid = +req.params.id;
+  if (!canSeeLesson(req.user, lid)) bad('Немає доступу');
+  const files = req.files || [];
+  if (!files.length) bad('Файли не отримано');
+  const sess = activeSession(req.user.class_id);
+  const inClass = sess && sess.lesson_id === lid && req.pc;
+  const group = groupFor(inClass ? sess : null, req.user, req.pc).map(g => g.id);
+  const dir = path.join(WORK, String(lid), String(req.user.id));
+  fs.mkdirSync(dir, { recursive: true });
+  const ids = [];
+  for (const f of files) {
+    const name = safeName(origName(f), 120);
+    const stored = path.join(dir, path.basename(f.filename));
+    fs.renameSync(f.path, stored);
+    // той самий файл надіслано повторно — замінюємо попередню версію (якщо ще не здана)
+    for (const old of all('SELECT id, stored FROM student_files WHERE student_id=? AND lesson_id=? AND name=? AND submission_id IS NULL', req.user.id, lid, name)) {
+      try { fs.unlinkSync(old.stored); } catch {}
+      run('DELETE FROM student_files WHERE id=?', old.id);
+    }
+    ids.push(Number(run('INSERT INTO student_files(student_id,lesson_id,session_id,name,stored,size,group_ids) VALUES(?,?,?,?,?,?,?)',
+      req.user.id, lid, inClass ? sess.id : null, name, stored, f.size, JSON.stringify(group)).lastInsertRowid));
+  }
+  if (!req.body.finishing) {
+    const title = get('SELECT title FROM lessons WHERE id=?', lid).title;
+    notifyTeachers(`📎 ${req.pc ? 'ПК ' + req.pc + ': ' : '🏠 '}${req.user.name} надіслав(ла) ${files.length} файл(и) — «${title}»`, inClass ? `#/live/${sess.id}` : '#/submissions');
+  }
+  io.to('teacher').emit('live:changed', {});
+  return { ids, files: filesFor(req.user.id, lid) };
+}));
+app.delete('/api/my-files/:id', auth, h(req => {
+  const f = get('SELECT * FROM student_files WHERE id=? AND student_id=? AND submission_id IS NULL', req.params.id, req.user.id);
+  if (!f) bad('Файл уже здано — видалити не можна');
+  try { fs.unlinkSync(f.stored); } catch {}
+  run('DELETE FROM student_files WHERE id=?', f.id);
+  return { ok: true };
+}));
+// Завантаження файлу результату: вчитель, автор або учасник його групи
+app.get('/api/files/:id', auth, (req, res) => {
+  const f = get('SELECT * FROM student_files WHERE id=?', req.params.id);
+  const allowed = f && (req.user.role === 'teacher' || f.student_id === req.user.id || JSON.parse(f.group_ids || '[]').includes(req.user.id));
+  if (!allowed) return res.status(404).json({ error: 'Файл не знайдено' });
+  res.setHeader('Content-Disposition', `${req.query.view ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.name)}`);
+  res.sendFile(f.stored);
+});
+// Усі результати уроку для класу одним ZIP: <Учень>/<файли> + знімок екрана
+app.get('/api/lessons/:id/results.zip', auth, teacher, (req, res) => {
+  try {
+    const lid = +req.params.id, cid = +req.query.class_id;
+    const lesson = get('SELECT title FROM lessons WHERE id=?', lid);
+    const cls = get('SELECT name FROM classes WHERE id=?', cid);
+    if (!lesson || !cls) return res.status(404).json({ error: 'Не знайдено' });
+    const entries = [];
+    for (const st of studentsOf(cid)) {
+      const folder = safeName(st.name);
+      const used = new Set();
+      for (const f of filesFor(st.id, lid)) {
+        const row = get('SELECT stored FROM student_files WHERE id=?', f.id);
+        if (!row || !fs.existsSync(row.stored)) continue;
+        let n = f.name; for (let i = 2; used.has(n); i++) n = f.name.replace(/(\.[^.]*)?$/, ` (${i})$1`);
+        used.add(n);
+        entries.push({ name: `${folder}/${n}`, data: fs.readFileSync(row.stored), date: new Date(f.created_at.replace(' ', 'T') + 'Z') });
+      }
+      const ls = get('SELECT screenshot FROM lesson_status WHERE student_id=? AND lesson_id=?', st.id, lid);
+      if (ls?.screenshot) {
+        const p = path.join(UPLOADS, ls.screenshot.replace('/uploads/', ''));
+        if (fs.existsSync(p)) entries.push({ name: `${folder}/знімок-екрана${path.extname(p)}`, data: fs.readFileSync(p) });
+      }
+    }
+    if (!entries.length) return res.status(404).json({ error: 'Ще немає зданих файлів' });
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeName(`${cls.name} — ${lesson.title}`) + '.zip')}`);
+    res.end(makeZip(entries));
+  } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+});
+// Вчитель надсилає файли для роботи під час уроку — вони одразу копіюються в папки учнів
+app.post('/api/sessions/:id/files', auth, teacher, upload.array('files', 20), h(req => {
+  const s = get('SELECT * FROM sessions WHERE id=?', req.params.id);
+  if (!s?.lesson_id) bad('Урок не знайдено');
+  const names = [];
+  for (const f of req.files || []) {
+    const name = origName(f);
+    run("DELETE FROM materials WHERE lesson_id=? AND kind='workfile' AND title=?", s.lesson_id, name); // нова версія замінює стару
+    run('INSERT INTO materials(lesson_id,kind,title,filename,url,mime) VALUES(?,?,?,?,?,?)', s.lesson_id, 'workfile', name, f.filename, '/uploads/' + f.filename, f.mimetype);
+    names.push(name);
+  }
+  if (!names.length) bad('Оберіть файли');
+  io.to('class:' + s.class_id).emit('files:new', { lesson_id: s.lesson_id, names });
+  return { ok: true, names };
+}));
+// Відкрити посилання на комп'ютерах учнів (наприклад, тест)
+app.post('/api/sessions/:id/open-url', auth, teacher, h(req => {
+  const s = get('SELECT * FROM sessions WHERE id=?', req.params.id);
+  if (!s) bad('Урок не знайдено');
+  let url = String(req.body.url || '').trim();
+  if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+  try { const u = new URL(url); if (!/^https?:$/.test(u.protocol)) throw 0; } catch { bad('Невірне посилання'); }
+  const pcs = Array.isArray(req.body.pcs) && req.body.pcs.length ? req.body.pcs.map(Number) : null;
+  const lock = req.body.lock ? 1 : 0;
+  const title = String(req.body.title || '').slice(0, 200);
+  const id = Number(run('INSERT INTO session_links(session_id,url,title,lock,pcs) VALUES(?,?,?,?,?)', s.id, url, title, lock, pcs ? JSON.stringify(pcs) : null).lastInsertRowid);
+  io.to('class:' + s.class_id).emit('open:url', { id, url, title, lock: !!lock, pcs });
+  return { ok: true, id, url };
+}));
+app.post('/api/sessions/:id/close-url', auth, teacher, h(req => {
+  const s = get('SELECT * FROM sessions WHERE id=?', req.params.id);
+  if (req.body.link_id) run('UPDATE session_links SET closed_at=CURRENT_TIMESTAMP WHERE id=? AND session_id=?', req.body.link_id, s.id);
+  else run('UPDATE session_links SET closed_at=CURRENT_TIMESTAMP WHERE session_id=? AND closed_at IS NULL', s.id);
+  io.to('class:' + s.class_id).emit('url:close', { id: req.body.link_id || null });
+  return { ok: true };
 }));
 
 // Втрата фокусу (учень пішов з вікна під час демонстрації)
@@ -723,7 +862,7 @@ app.post('/api/homework/:id/submit', auth, upload.single('file'), h(req => {
 app.get('/api/submissions', auth, teacher, h(req => all(`SELECT s.*, u.name, c.name class_name, l.title lesson_title, h.text hw_text FROM submissions s
   JOIN users u ON u.id=s.student_id JOIN classes c ON c.id=u.class_id LEFT JOIN lessons l ON l.id=s.lesson_id LEFT JOIN homework h ON h.id=s.homework_id
   WHERE 1=1 ${req.query.class_id ? 'AND u.class_id=' + parseInt(req.query.class_id, 10) : ''} ${req.query.unseen ? 'AND s.seen=0' : ''}
-  ORDER BY s.id DESC LIMIT 300`).map(s => ({ ...s, group_names: s.group_ids ? all(`SELECT name FROM users WHERE id IN (${JSON.parse(s.group_ids).map(Number).join(',') || 0})`).map(r => r.name) : [] }))));
+  ORDER BY s.id DESC LIMIT 300`).map(s => ({ ...s, files: all('SELECT id, name, size FROM student_files WHERE submission_id=?', s.id), group_names: s.group_ids ? all(`SELECT name FROM users WHERE id IN (${JSON.parse(s.group_ids).map(Number).join(',') || 0})`).map(r => r.name) : [] }))));
 app.put('/api/submissions/:id/seen', auth, teacher, h(req => { run('UPDATE submissions SET seen=1 WHERE id=?', req.params.id); return { ok: true }; }));
 
 // ======================================================================

@@ -32,6 +32,8 @@ export function onTeacherSocket(s) {
   s.on('focus', d => { if (d.lost) emit('focusAlert', d); });
 }
 
+const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : Math.max(1, Math.round((n || 0) / 1024)) + ' КБ';
+const filesHtml = files => (files || []).length ? `<div class="files">${files.map(f => `<a class="file" href="/api/files/${f.id}">📎 ${esc(f.name)} <small>${fmtSize(f.size)}</small></a>`).join('')}</div>` : '';
 const debounce = (fn, ms = 300) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 // =====================================================================
@@ -176,7 +178,7 @@ async function studentProfile(id) {
       <section class="card"><h3>Де сидів і з ким</h3><table class="tbl compact">${d.seats.map(s => `<tr><td>${fmtDate(s.date)}</td><td>ПК ${s.computer_no}</td><td>${s.was_driver ? '⌨️ за клавіатурою' : '🧭 штурман'}</td><td class="muted">${esc(s.mates || 'сам')}</td></tr>`).join('') || '<tr><td class="muted">немає</td></tr>'}</table></section>
       <section class="card"><h3>Входи в систему</h3><table class="tbl compact">${d.logins.map(l => `<tr><td>${fmtDate(l.at, true)}</td><td>${l.place === 'home' ? '🏠 вдома' : '🏫 ПК ' + l.computer_no + (l.host ? ' · ' + esc(l.host) : '')}</td><td class="muted">${esc(l.client)} ${esc(l.ip || '')}</td></tr>`).join('')}</table></section>
     </div>`, '#/');
-  $$('[data-cell]', main).forEach(a => a.onclick = e => { e.preventDefault(); const l = d.lessons.find(x => x.id === +a.dataset.cell); cellDialog({ id: d.student.id, name: d.student.name }, l, l.status, d.grades.filter(g => g.lesson_id === l.id), render); });
+  $$('[data-cell]', main).forEach(a => a.onclick = e => { e.preventDefault(); const l = d.lessons.find(x => x.id === +a.dataset.cell); cellDialog({ id: d.student.id, name: d.student.name }, l, l.status, d.grades.filter(g => g.lesson_id === l.id), render, d.cls?.id); });
 }
 
 // =====================================================================
@@ -251,12 +253,13 @@ async function lessonEditor(id) {
     </section>
     <section class="card">
       <h3>📎 Матеріали: презентація, відео, зображення, файли</h3>
-      <div class="mat-ed">${l.materials.map(m => `<div class="mat-row"><span>${{ presentation: '📽', card: '📋', video: '🎬', image: '🖼', file: '📎', link: '🔗' }[m.kind] || '📎'} <a href="${esc(m.url)}" target="_blank">${esc(m.title)}</a></span><button class="btn sm ghost" data-delm="${m.id}">🗑</button></div>`).join('') || '<p class="muted">Немає матеріалів</p>'}</div>
+      <div class="mat-ed">${l.materials.map(m => `<div class="mat-row"><span>${{ presentation: '📽', card: '📋', video: '🎬', image: '🖼', file: '📎', link: '🔗', workfile: '📂' }[m.kind] || '📎'} <a href="${esc(m.url)}" target="_blank">${esc(m.title)}</a></span><button class="btn sm ghost" data-delm="${m.id}">🗑</button></div>`).join('') || '<p class="muted">Немає матеріалів</p>'}</div>
       <form id="upf" class="row wrap">
-        <select name="kind"><option value="">Тип: авто</option><option value="presentation">📽 Презентація (PDF — для демонстрації)</option><option value="card">📋 Інструкційна картка</option><option value="video">🎬 Відео</option><option value="image">🖼 Зображення</option><option value="file">📎 Файл</option></select>
+        <select name="kind"><option value="">Тип: авто</option><option value="presentation">📽 Презентація (PDF — для демонстрації)</option><option value="card">📋 Інструкційна картка</option><option value="video">🎬 Відео</option><option value="image">🖼 Зображення</option><option value="file">📎 Файл (лише для перегляду)</option><option value="workfile">📂 Файл для роботи — копіюється в папку учня</option></select>
         <input name="title" placeholder="Назва (необов'язково)"><input type="file" name="file" required>
         <button class="btn primary">Завантажити</button></form>
       <form id="lnk" class="row wrap"><input name="url" placeholder="Посилання (YouTube, сайт…)" required><input name="title" placeholder="Назва"><button class="btn">+ Посилання</button></form>
+      <p class="hint"><b>📂 Файл для роботи</b> (приклад документа, електронна таблиця, заготовка проєкту) кіоск автоматично копіює в особисту папку учня <i>Документи › InfoKlas › Учень › Урок</i>; вдома учень може його завантажити.</p>
       <p class="hint">Презентацію PowerPoint збережіть як PDF (Файл → Зберегти як → PDF) — тоді її можна показувати на всіх комп'ютерах у режимі демонстрації.</p>
     </section>
     <section class="card">
@@ -333,6 +336,9 @@ async function livePage(id) {
       <button class="btn" id="seat">🔀 Розсадити автоматично</button>
       <button class="btn" id="rot">🔄 Поміняти ролі</button>
       <button class="btn" id="unl">🔓 Розблокувати ПК</button>
+      <button class="btn" id="url">🔗 Відкрити посилання</button>
+      <button class="btn" id="pushf">📤 Файли учням</button>
+      ${L.lesson ? `<a class="btn ghost" href="/api/lessons/${L.lesson.id}/results.zip?class_id=${s.class_id}" title="Усі файли й знімки екрана, по папках учнів">⬇ Роботи (ZIP)</a>` : ''}
       <span class="hint" id="kiosk-sum"></span>
       <span class="spacer"></span>
       <button class="btn danger ghost" id="alarm">🚨 Тривога — перервати</button>
@@ -343,6 +349,7 @@ async function livePage(id) {
       <div><div id="grid" class="pc-grid"></div><div id="unseated"></div></div>
       <aside class="live-side">
         <section class="card"><h3>🙋 Запитання <span id="hq-n"></span></h3><div id="helpq"></div></section>
+        <section class="card" id="links-card"><h3>🔗 Відкриті посилання</h3><div id="links"></div></section>
         <section class="card"><h3>✅ Завершили</h3><div id="fins"></div></section>
         <section class="card"><h3>📋 Присутність</h3><div id="att"></div></section>
       </aside>
@@ -390,7 +397,11 @@ async function livePage(id) {
       <div class="small">${esc(h.step_text.slice(0, 80))}</div>${h.question ? `<div class="q">«${esc(h.question)}»</div>` : ''}${h.existing.length ? `<small class="muted">є ${h.existing.length} поясн.</small>` : ''}</div>`).join('') || '<p class="muted small">Немає</p>';
 
     // --- Завершили ---
-    $('#fins').innerHTML = L.finishes.map(f => `<div class="fin-row" data-f="${f.id}">${f.file ? `<img src="${esc(f.file)}" class="thumb">` : ''}<div><b>${esc(f.name)}</b> <small class="muted">${fmtDate(f.created_at, true)}</small>${f.text ? `<div class="small">«${esc(f.text)}»</div>` : ''}</div></div>`).join('') || '<p class="muted small">Поки ніхто</p>';
+    $('#fins').innerHTML = L.finishes.map(f => `<div class="fin-row" data-f="${f.id}">${f.file ? `<img src="${esc(f.file)}" class="thumb">` : ''}<div><b>${esc(f.name)}</b> <small class="muted">${fmtDate(f.created_at, true)}</small>${f.text ? `<div class="small">«${esc(f.text)}»</div>` : ''}${f.files?.length ? `<div class="small">📎 ${f.files.map(x => esc(x.name)).join(', ')}</div>` : ''}</div></div>`).join('') || '<p class="muted small">Поки ніхто</p>';
+    const openLinks = (L.links || []).filter(k => !k.closed_at);
+    $('#links-card').style.display = openLinks.length ? '' : 'none';
+    $('#links').innerHTML = openLinks.map(k => `<div class="link-live"><span>${k.lock ? '🔒 ' : ''}<a href="${esc(k.url)}" target="_blank" rel="noopener">${esc(k.title || k.url)}</a>${k.pcs ? ` <small class="muted">ПК ${JSON.parse(k.pcs).join(', ')}</small>` : ''}</span><button class="btn sm" data-closelink="${k.id}" title="Закрити на ПК учнів">✕</button></div>`).join('')
+      + (openLinks.length > 1 ? '<button class="btn sm ghost" data-closelink="">✕ Закрити всі</button>' : '');
     bind();
   }
   function chip(st) {
@@ -421,11 +432,46 @@ async function livePage(id) {
       refresh();
     }));
     $$('.hq').forEach(h => h.onclick = () => answerDialog(L.help.find(x => x.id === +h.dataset.h), refresh));
+    $$('[data-closelink]').forEach(b => b.onclick = async () => { await api(`/sessions/${id}/close-url`, { body: { link_id: b.dataset.closelink ? +b.dataset.closelink : null } }); toast('Закрито на ПК учнів'); refresh(); });
     $$('.fin-row').forEach(f => f.onclick = () => {
       const x = L.finishes.find(y => y.id === +f.dataset.f);
-      modal(`<h3>${esc(x.name)} — завершив(ла)</h3>${x.file ? `<img src="${esc(x.file)}" class="shot-full">` : ''}${x.text ? `<p>Рефлексія: «${esc(x.text)}»</p>` : ''}`, { wide: true });
+      modal(`<h3>${esc(x.name)} — завершив(ла)</h3>${filesHtml(x.files)}${x.file ? `<img src="${esc(x.file)}" class="shot-full">` : ''}${x.text ? `<p>Рефлексія: «${esc(x.text)}»</p>` : ''}`, { wide: true });
       put(`/submissions/${x.id}/seen`, {});
     });
+  }
+  function linkDialog() {
+    const pcs = [...new Set(L.students.filter(st => st.seat).map(st => st.seat.computer_no))].sort((a, b) => a - b);
+    const m = modal(`<h3>🔗 Відкрити посилання на комп'ютерах учнів</h3>
+      <label>Посилання<input id="lu" placeholder="https://naurok.com.ua/test/..."></label>
+      <label>Назва (необов'язково)<input id="lt" placeholder="напр. Тест: форматування тексту"></label>
+      <label class="switch"><input type="checkbox" id="lk"> 🔒 <b>Режим тесту</b>: на весь екран, учень не може закрити чи перейти в інше вікно (лише в кіоску; закриваєте ви)</label>
+      <p><b>Кому:</b></p>
+      <label class="switch"><input type="radio" name="to" value="all" checked> усім учням класу (і тим, хто вдома)</label><br>
+      <label class="switch"><input type="radio" name="to" value="pcs"> лише на ПК:</label>
+      <div class="row wrap pcs-pick">${(pcs.length ? pcs : Array.from({ length: L.computers }, (_, i) => i + 1)).map(n => `<label class="switch"><input type="checkbox" value="${n}"> ${n}</label>`).join('')}</div>
+      <p class="hint">У кіоску посилання відкривається в його вікні (браузери під час уроку заблоковані). У звичайному браузері — у новій вкладці.</p>
+      <button class="btn primary big" id="lsend">🔗 Відкрити</button>`);
+    $('#lu', m.el).focus();
+    $$('.pcs-pick input', m.el).forEach(c => c.onchange = () => { m.el.querySelector('input[value=pcs]').checked = true; });
+    $('#lsend', m.el).onclick = async () => {
+      const toPcs = m.el.querySelector('input[name=to]:checked').value === 'pcs';
+      const sel = toPcs ? $$('.pcs-pick input:checked', m.el).map(c => +c.value) : null;
+      if (toPcs && !sel.length) return toast('Оберіть ПК', 'err');
+      const r = await api(`/sessions/${id}/open-url`, { body: { url: $('#lu', m.el).value, title: $('#lt', m.el).value, lock: $('#lk', m.el).checked, pcs: sel } });
+      m.close(); toast('Посилання відкрито: ' + r.url); refresh();
+    };
+  }
+  function filesDialog() {
+    const m = modal(`<h3>📤 Надіслати файли учням</h3>
+      <p class="muted">Файли (приклади документів, таблиці, заготовки) з'являться в особистій папці кожного учня
+        <i>Документи › InfoKlas › Учень › ${esc(L.lesson?.title || 'Урок')}</i> і додадуться до уроку як «Файл для роботи» — вдома учні теж зможуть їх завантажити.</p>
+      <input type="file" id="pf" multiple><br><br><button class="btn primary big" id="psend">📤 Надіслати</button>`);
+    $('#psend', m.el).onclick = async () => {
+      const list = $('#pf', m.el).files; if (!list.length) return toast('Оберіть файли', 'err');
+      const fd = new FormData(); [...list].forEach(f => fd.append('files', f));
+      const r = await api(`/sessions/${id}/files`, { body: fd });
+      m.close(); toast('Надіслано: ' + r.names.join(', '));
+    };
   }
   function studentChipDialog(sid) {
     const st = L.students.find(x => x.id === sid);
@@ -463,6 +509,8 @@ async function livePage(id) {
       refresh();
     };
     $('#rot').onclick = async () => { await api(`/sessions/${id}/seating/rotate`, { body: {} }); toast('Ролі змінено — учні побачать сповіщення'); refresh(); };
+    $('#url').onclick = linkDialog;
+    $('#pushf').onclick = filesDialog;
     $('#unl').onclick = async () => { await api('/devices/command', { body: { cmd: 'unlock' } }); toast('Команду розблокування надіслано всім ПК'); };
     $('#end').onclick = async () => { if (!confirm('Завершити урок? Хто не відмічений — буде записаний як відсутній.' + (L.closeKiosk ? '\nКіоски на всіх ПК закриються.' : ''))) return; stopScreenShare(); await api(`/sessions/${id}/end`, { body: {} }); render(); };
     $('#alarm').onclick = async () => {
@@ -582,14 +630,14 @@ async function journalPage(classId) {
         const gr = Object.values(J.grades[st.id] || {}).flat().map(g => parseFloat(g.value)).filter(x => !isNaN(x));
         return `<tr><td class="sticky"><a href="#/student/${st.id}">${esc(st.name)}</a></td>
         ${J.lessons.map(l => { const c = J.cells[st.id][l.id]; const S = STATES[c.state]; const g = (J.grades[st.id]?.[l.id] || []);
-          return `<td class="cell ${S.cls}" data-s="${st.id}" data-l="${l.id}" title="${esc(S.label)}${c.total ? ` · сам ${c.self}, у групі ${c.group} з ${c.total}` : ''}">${S.icon}${c.home ? '<sup>🏠</sup>' : ''}${g.length ? `<b class="g">${g.map(x => esc(x.value)).join(',')}</b>` : ''}</td>`; }).join('')}
+          return `<td class="cell ${S.cls}" data-s="${st.id}" data-l="${l.id}" title="${esc(S.label)}${c.total ? ` · сам ${c.self}, у групі ${c.group} з ${c.total}` : ''}">${S.icon}${c.home ? '<sup>🏠</sup>' : ''}${c.files?.length ? '<sup title="Є файли">📎</sup>' : ''}${g.length ? `<b class="g">${g.map(x => esc(x.value)).join(',')}</b>` : ''}</td>`; }).join('')}
         <td class="muted">${st.driver}/${st.seated}</td><td><b>${gr.length ? (gr.reduce((a, b) => a + b, 0) / gr.length).toFixed(1) : ''}</b></td></tr>`; }).join('')}</tbody>
     </table></div>
     <p class="hint">Клікніть клітинку, щоб побачити деталі (кроки, скриншот, самооцінку), підтвердити вміння чи поставити оцінку.</p>`, '#/journal');
   $('#cls').onchange = e => { location.hash = '#/journal/' + e.target.value; };
   $$('.cell', main).forEach(td => td.onclick = () => {
     const st = J.students.find(s => s.id === +td.dataset.s), l = J.lessons.find(x => x.id === +td.dataset.l);
-    cellDialog(st, l, J.cells[st.id][l.id], J.grades[st.id]?.[l.id] || [], render);
+    cellDialog(st, l, J.cells[st.id][l.id], J.grades[st.id]?.[l.id] || [], render, J.cls.id);
   });
   $('#csv').onclick = () => {
     const rows = [['Учень', ...J.lessons.map(l => l.title), 'За клавіатурою']];
@@ -599,14 +647,16 @@ async function journalPage(classId) {
   };
 }
 
-function cellDialog(st, l, c, grades, after) {
+function cellDialog(st, l, c, grades, after, classId) {
   c = c || { state: 'none', total: 0, self: 0, group: 0 };
   const sa = c.self_assess ? Object.entries(c.self_assess) : [];
   const m = modal(`<h3>${esc(st.name)} — ${esc(l.title)}</h3>
     <p><span class="st ${STATES[c.state].cls}">${STATES[c.state].icon}</span> ${STATES[c.state].label}</p>
     ${c.total ? `<p>Кроки: ✋ сам <b>${c.self}</b>, 👥 у групі <b>${c.group}</b> з ${c.total}${c.home ? ` · 🏠 вдома: ${c.home}` : ''}</p>` : ''}
     ${c.finished_at ? `<p>Здано: ${fmtDate(c.finished_at, true)}</p>` : ''}
+    ${c.files?.length ? `<p><b>Файли роботи:</b></p>${filesHtml(c.files)}` : ''}
     ${c.screenshot ? `<img src="${esc(c.screenshot)}" class="shot-prev">` : ''}
+    ${classId ? `<p><a href="/api/lessons/${l.id}/results.zip?class_id=${classId}">⬇ Роботи всього класу з цього уроку (ZIP)</a></p>` : ''}
     ${sa.length ? `<p><b>Самооцінка:</b></p><ul>${sa.map(([k, v]) => `<li>${['🔴', '🟡', '🟢'][v]} ${esc(k)}</li>`).join('')}</ul>` : ''}
     ${c.reflection ? `<p><b>Рефлексія:</b> «${esc(c.reflection)}»</p>` : ''}
     <h4>Підтвердження вміння</h4>
@@ -631,13 +681,14 @@ async function submissionsPage() {
       ${s.file && /\.(png|jpe?g|webp)$/i.test(s.file) ? `<img src="${esc(s.file)}" class="thumb-big">` : s.file ? `<a href="${esc(s.file)}" target="_blank">📎 файл</a>` : ''}
       <div><b>${esc(s.group_names.length > 1 ? s.group_names.join(', ') : s.name)}</b> · ${esc(s.class_name)}<br>
       ${s.kind === 'homework' ? '🏠 ДЗ' : '✅ Практична'}: ${esc(s.lesson_title || '')} <small class="muted">${fmtDate(s.created_at, true)}</small>
-      ${s.text ? `<div class="small">«${esc(s.text)}»</div>` : ''}</div></div>`).join('') || '<p class="muted">Поки порожньо</p>'}</div>`, '#/submissions');
+      ${s.text ? `<div class="small">«${esc(s.text)}»</div>` : ''}${s.files?.length ? `<div class="small">📎 ${s.files.length} файл(и)</div>` : ''}</div></div>`).join('') || '<p class="muted">Поки порожньо</p>'}</div>`, '#/submissions');
   $$('.sub', main).forEach(el => el.onclick = async () => {
     const s = list.find(x => x.id === +el.dataset.id);
     await put(`/submissions/${s.id}/seen`, {}); el.classList.remove('new');
     const m = modal(`<h3>${esc(s.name)} — ${esc(s.lesson_title || '')}</h3>
       ${s.hw_text ? `<div class="quote">${md(s.hw_text)}</div>` : ''}
       ${s.file && /\.(png|jpe?g|webp)$/i.test(s.file) ? `<img src="${esc(s.file)}" class="shot-full">` : s.file ? `<a class="btn" href="${esc(s.file)}" target="_blank">📎 Відкрити файл</a>` : ''}
+      ${filesHtml(s.files)}
       ${s.text ? `<p>«${esc(s.text)}»</p>` : ''}
       ${s.group_names.length > 1 ? `<p class="muted">Група: ${esc(s.group_names.join(', '))}</p>` : ''}
       <div class="row wrap"><select id="gv">${Array.from({ length: 12 }, (_, i) => `<option>${12 - i}</option>`).join('')}</select>

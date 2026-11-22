@@ -232,6 +232,86 @@ ipcMain.handle('kiosk:register', async (e, d) => {
   } catch (err) { return { ok: false, error: err.message }; }
 });
 
+// ---------- Робоча папка учня: Документи/InfoKlas/<Учень>/<Урок> ----------
+// Файли для роботи від вчителя копіюються сюди; учень зберігає тут результати; "Я закінчив" забирає нові/змінені файли.
+const DOCS = (() => { const d = app.getPath('documents'); return d === os.homedir() ? path.join(d, 'Documents') : d; })();
+const WORK_ROOT = path.join(DOCS, 'InfoKlas');
+const MANIFEST = '.infoklas.json';
+const safeName = (s, max = 80) => String(s || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/^[\s.]+|[\s.]+$/g, '').slice(0, max) || 'без назви';
+function folderOf(student, lesson) {
+  const dir = path.join(WORK_ROOT, safeName(student), safeName(lesson));
+  if (!dir.startsWith(WORK_ROOT + path.sep)) throw new Error('bad path');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+const readMan = dir => { try { return JSON.parse(fs.readFileSync(path.join(dir, MANIFEST), 'utf8')); } catch { return { orig: {}, sent: {} }; } };
+const writeMan = (dir, m) => { try { fs.writeFileSync(path.join(dir, MANIFEST), JSON.stringify(m)); if (platform.isWin) require('child_process').execFile('attrib', ['+h', path.join(dir, MANIFEST)], () => {}); } catch {} };
+const isJunk = n => n === MANIFEST || n.startsWith('.') || n.startsWith('~$') || n.startsWith('.~lock') || /\.(tmp|crdownload|part)$/i.test(n);
+
+ipcMain.handle('kiosk:folder-info', (e, { student, lesson }) => {
+  const dir = folderOf(student, lesson);
+  return { path: dir, files: fs.readdirSync(dir).filter(n => !isJunk(n)) };
+});
+ipcMain.handle('kiosk:folder-write', (e, { student, lesson, name, data }) => {
+  const dir = folderOf(student, lesson);
+  const n = safeName(name, 120), p = path.join(dir, n);
+  if (fs.existsSync(p)) return { skipped: true };           // ніколи не перезаписуємо роботу учня
+  fs.writeFileSync(p, Buffer.from(data));
+  const st = fs.statSync(p), m = readMan(dir);
+  m.orig[n] = { size: st.size, mtimeMs: st.mtimeMs }; writeMan(dir, m);
+  return { ok: true };
+});
+ipcMain.handle('kiosk:folder-open', (e, { student, lesson }) => shell.openPath(folderOf(student, lesson)));
+// Нові або змінені файли (результати), які ще не надсилалися в цьому вигляді
+ipcMain.handle('kiosk:folder-collect', (e, { student, lesson }) => {
+  const dir = folderOf(student, lesson), m = readMan(dir), out = [];
+  let total = 0;
+  for (const n of fs.readdirSync(dir)) {
+    if (isJunk(n)) continue;
+    const p = path.join(dir, n), st = fs.statSync(p);
+    if (!st.isFile()) continue;
+    const o = m.orig[n];
+    const changed = !o || o.size !== st.size || st.mtimeMs > o.mtimeMs + 2000;
+    const sentSame = m.sent[n] && m.sent[n].size === st.size && Math.abs(m.sent[n].mtimeMs - st.mtimeMs) < 1;
+    if (!changed || st.size > 100 * 1024 * 1024 || total > 300 * 1024 * 1024) continue;
+    total += st.size;
+    out.push({ name: n, size: st.size, mtimeMs: st.mtimeMs, sent: !!sentSame, data: sentSame ? null : fs.readFileSync(p) });
+  }
+  return out;
+});
+ipcMain.handle('kiosk:folder-mark-sent', (e, { student, lesson, files }) => {
+  const dir = folderOf(student, lesson), m = readMan(dir);
+  for (const f of files) m.sent[f.name] = { size: f.size, mtimeMs: f.mtimeMs };
+  writeMan(dir, m); return { ok: true };
+});
+
+// ---------- Посилання від вчителя (тест тощо) — відкриваються у вікні кіоску ----------
+const urlWins = new Map();
+ipcMain.on('kiosk:open-url', (e, { id, url, lock, title }) => {
+  if (!/^https?:\/\//i.test(url || '')) return;
+  urlWins.get(id)?.destroy();
+  const w = new BrowserWindow({
+    width: 1200, height: 800, title: title || url, autoHideMenuBar: true, show: false,
+    kiosk: !!lock, fullscreen: !!lock, alwaysOnTop: !!lock, closable: !lock, minimizable: !lock,
+    webPreferences: { contextIsolation: true, sandbox: true },
+  });
+  if (lock) {
+    // Режим тесту: на весь екран, закриває лише вчитель
+    w.setAlwaysOnTop(true, 'screen-saver');
+    w.on('blur', () => setTimeout(() => { if (!w.isDestroyed()) { w.show(); w.focus(); } }, 50));
+    w.on('close', ev => { if (!w.allowClose && !allowQuit) ev.preventDefault(); });
+    w.webContents.on('before-input-event', (ev, i) => { if ((i.alt && i.key === 'F4') || (i.control && i.key.toLowerCase() === 'w')) ev.preventDefault(); });
+  }
+  w.webContents.setWindowOpenHandler(({ url: u }) => { if (/^https?:/i.test(u)) w.loadURL(u); return { action: 'deny' }; });
+  w.once('ready-to-show', () => { if (!lock) w.maximize(); w.show(); w.focus(); });
+  w.on('closed', () => urlWins.delete(id));
+  w.loadURL(url);
+  urlWins.set(id, w);
+});
+ipcMain.on('kiosk:close-url', (e, { id }) => {
+  for (const [k, w] of urlWins) if (!id || k === id) { w.allowClose = true; w.destroy(); }
+});
+
 // ---------- Старт ----------
 if (!autostartArg && !hasArg('--restore-keys')) app.whenReady().then(() => {
   // Перехоплюємо системні комбінації, які можна перехопити (Alt+Tab/Ctrl+Alt+Del — див. README про політики Windows)
@@ -241,5 +321,5 @@ if (!autostartArg && !hasArg('--restore-keys')) app.whenReady().then(() => {
   else { connect(); if (START_OPEN) showApp(); else showLock(); }
   setInterval(enforceApps, 4000);
 });
-app.on('before-quit', e => { if (!allowQuit) e.preventDefault(); else holdKeys(false); });
+app.on('before-quit', e => { if (!allowQuit) e.preventDefault(); else { holdKeys(false); for (const w of urlWins.values()) { w.allowClose = true; w.destroy(); } } });
 app.on('window-all-closed', () => { if (allowQuit) app.quit(); });

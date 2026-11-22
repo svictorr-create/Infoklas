@@ -26,7 +26,8 @@ code { background: #eef1f7; padding: 1px 6px; border-radius: 5px; font-size: .92
 .btn.sm { padding: 4px 10px; font-size: .88em; border-radius: 8px; } .btn.big { padding: 12px 22px; font-size: 1.08em; }
 input, select, textarea { font: inherit; padding: 8px 10px; border: 1px solid #cfd5e3; border-radius: 9px; background: #fff; width: 100%; color: inherit; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--pri-2); border-color: var(--pri); }
-input[type=checkbox] { width: auto; } input[type=file] { border: none; padding: 4px 0; }
+input[type=checkbox], input[type=radio] { width: auto; flex: none; }
+.pcs-pick { gap: 14px; margin: 6px 0 4px 26px; } input[type=file] { border: none; padding: 4px 0; }
 label { display: block; margin: 0 0 12px; font-weight: 500; font-size: .95em; }
 label > input, label > select, label > textarea { margin-top: 4px; font-weight: 400; }
 label.switch { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 400; cursor: pointer; }
@@ -263,3 +264,14 @@ a.class-card { color: var(--ink); text-decoration: none; }
 .pc-top small.host { display: block; font-weight: 500; font-size: .78em; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
 .pc-big small { display: block; font-weight: 500; font-size: .75em; opacity: .75; font-family: ui-monospace, Consolas, monospace; }
 .host-big { font-size: 1em; }
+
+/* робоча папка, посилання */
+.folder-path { background: #f6f8fd; border-radius: 8px; padding: 6px 10px; font-family: ui-monospace, Consolas, monospace; font-size: .88em; }
+.files { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 12px; }
+.file { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 9px; padding: 5px 10px; background: #fff; font-size: .92em; }
+.file.done { background: var(--ok-2); border-color: #b2e4be; } .file small { color: var(--muted); }
+.file .x { border: none; background: none; cursor: pointer; color: var(--muted); }
+.fin-files { background: #f8f9fc; border-radius: 10px; padding: 8px 12px; margin: 8px 0; font-size: .92em; }
+.link-row { padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.link-live { display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: .88em; }
+.link-live a { word-break: break-all; }

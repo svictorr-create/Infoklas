@@ -139,7 +139,7 @@ cd kiosk && npm install && npm run dist:linux
 ```
 На кожному учнівському ПК від імені адміністратора:
 ```bash
-sudo bash setup-mint.sh infoklas-kiosk_1.0.0_amd64.deb
+sudo bash setup-mint.sh infoklas-kiosk_1.1.0_amd64.deb
 ```
 Скрипт `kiosk/linux/setup-mint.sh` встановлює кіоск і створює обліковий запис учня `uchen` без прав адміністратора.
 Він також забороняє Ctrl+Alt+F1…F6 (вихід у текстову консоль) і Ctrl+Alt+Backspace та вимикає гостьовий сеанс.

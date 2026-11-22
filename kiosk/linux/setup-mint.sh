@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ІнфоКлас — підготовка учнівського ПК з Linux Mint (Cinnamon / Xfce / MATE).
-# Запуск (від адміністратора):   sudo bash setup-mint.sh infoklas-kiosk_1.0.0_amd64.deb [--autologin] [--autostart]
+# Запуск (від адміністратора):   sudo bash setup-mint.sh infoklas-kiosk_1.1.0_amd64.deb [--autologin] [--autostart]
 #
 # Що робить:
 #  1. встановлює кіоск-клієнт з .deb;

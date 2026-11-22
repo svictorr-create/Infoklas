@@ -3,7 +3,7 @@
   Запуск: правою кнопкою на PowerShell → «Запустити від імені адміністратора», потім:
 
     Set-ExecutionPolicy -Scope Process Bypass -Force
-    .\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.0.0.exe"
+    .\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.1.0.exe"
 
   Кіоск НЕ стартує сам: вчитель запускає його через Veyon → «Запустити програму»:
     "C:\Program Files\InfoKlas Kiosk\InfoKlas Kiosk.exe" --open

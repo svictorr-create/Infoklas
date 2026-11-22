@@ -1,11 +1,14 @@
 {
   "name": "infoklas-kiosk",
   "version": "1.0.0",
+  "author": "school",
+  "homepage": "https://example.org/infoklas",
   "description": "ІнфоКлас — кіоск-клієнт (Lockdown) для учнівських комп'ютерів",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "dist:linux": "electron-builder --linux deb AppImage"
   },
   "dependencies": {
     "socket.io-client": "^4.8.1"
@@ -17,8 +20,30 @@
   "build": {
     "appId": "ua.school.infoklas.kiosk",
     "productName": "InfoKlas Kiosk",
-    "files": ["main.js", "preload.js", "lock.html", "setup.html"],
-    "win": { "target": "nsis" },
-    "nsis": { "perMachine": true, "oneClick": false, "allowToChangeInstallationDirectory": false }
+    "files": [
+      "main.js",
+      "preload.js",
+      "platform.js",
+      "lock.html",
+      "setup.html"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": [
+        "deb",
+        "AppImage"
+      ],
+      "category": "Education",
+      "maintainer": "school",
+      "executableName": "infoklas-kiosk"
+    },
+    "nsis": {
+      "perMachine": true,
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": false
+    },
+    "publish": null
   }
 }

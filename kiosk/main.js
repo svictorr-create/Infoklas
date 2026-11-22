@@ -14,7 +14,7 @@ const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, sh
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
+const platform = require('./platform');
 const { io } = require('socket.io-client');
 
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -87,7 +87,16 @@ function showApp() {
   socket?.emit('device:locked', false);
 }
 
+// Linux: системні комбінації (Alt+Tab, Super, Ctrl+Alt+T…) вимкнені, поки треба тримати учня у вікні
+function holdKeys(on) {
+  if (!platform.isLinux) return;
+  if (on && !cfg.keysBackup?.saved) cfg.keysBackup = platform.disableShortcuts(cfg.keysBackup || {});
+  else if (!on && cfg.keysBackup?.saved) cfg.keysBackup = platform.restoreShortcuts(cfg.keysBackup);
+  else return;
+  saveCfg();
+}
 function applyFull() {
+  holdKeys(true);
   win.setKiosk(true); win.setFullScreen(true); win.setAlwaysOnTop(true, 'screen-saver'); win.setSkipTaskbar(true);
   win.setResizable(false); win.show(); win.focus();
 }
@@ -96,6 +105,7 @@ function applyLayout(l) {
   if (['demo', 'screen', 'lock'].includes(labMode)) l = 'locked'; // вчитель тримає увагу — учень не може вийти
   layout = l;
   if (l === 'locked') return applyFull();
+  if (l !== 'hide-for-shot') holdKeys(false);
   win.setKiosk(false); win.setFullScreen(false); win.setSkipTaskbar(false); win.setResizable(true);
   const wa = screen.getPrimaryDisplay().workArea;
   if (l === 'panel') {
@@ -132,18 +142,16 @@ function connect() {
   });
 }
 
-// ---------- Заборонені програми (Windows) ----------
+// ---------- Заборонені програми (Windows і Linux) ----------
 function enforceApps() {
-  if (process.platform !== 'win32' || !blockedApps.length) return;
+  if (!blockedApps.length) return;
   if (!locked && labMode === 'none') return; // поза уроком ПК вільний
-  execFile('tasklist', ['/fo', 'csv', '/nh'], { windowsHide: true }, (err, out) => {
-    if (err) return;
-    const running = new Set(out.split('\n').map(l => (l.split('","')[0] || '').replace(/"/g, '').trim().toLowerCase()).filter(Boolean));
-    for (const name of blockedApps) {
-      if (running.has(name)) {
-        execFile('taskkill', ['/f', '/im', name], { windowsHide: true }, () => {});
-        socket?.emit('device:killed', name);
-      }
+  platform.processes(list => {
+    const found = platform.findBlocked(list, blockedApps);
+    const reported = new Set();
+    for (const p of found) {
+      platform.kill(p);
+      if (!reported.has(p.name)) { reported.add(p.name); socket?.emit('device:killed', p.name); }
     }
   });
 }
@@ -194,7 +202,7 @@ ipcMain.handle('kiosk:register', async (e, d) => {
 
 // ---------- Старт ----------
 app.whenReady().then(() => {
-  if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: true }); // автозапуск з Windows
+  if (app.isPackaged) platform.setAutostart(app); // автозапуск з Windows / Linux
   // Перехоплюємо системні комбінації, які можна перехопити (Alt+Tab/Ctrl+Alt+Del — див. README про політики Windows)
   ['CommandOrControl+Esc', 'Alt+F4', 'F11', 'CommandOrControl+Shift+Esc'].forEach(k => { try { globalShortcut.register(k, () => {}); } catch {} });
   createWindow();
@@ -202,5 +210,5 @@ app.whenReady().then(() => {
   else { connect(); showLock(); }
   setInterval(enforceApps, 4000);
 });
-app.on('before-quit', e => { if (!allowQuit) e.preventDefault(); });
+app.on('before-quit', e => { if (!allowQuit) e.preventDefault(); else holdKeys(false); });
 app.on('window-all-closed', () => { if (allowQuit) app.quit(); });

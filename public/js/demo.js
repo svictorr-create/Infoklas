@@ -145,7 +145,7 @@ async function offerTo(sid) {
   state.socket.emit('rtc:signal', { to: sid, data: { sdp: p.localDescription } });
 }
 export async function startScreenShare(onEnded) {
-  shareStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false });
+  shareStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 10, max: 15 }, width: { max: 1280 }, height: { max: 800 } }  /* легше для старих ПК */, audio: false });
   shareStream.getVideoTracks()[0].addEventListener('ended', () => { stopScreenShare(); onEnded && onEnded(); });
   return shareStream;
 }

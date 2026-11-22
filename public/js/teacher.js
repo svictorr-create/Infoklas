@@ -712,7 +712,7 @@ async function settingsPage() {
   const main = shellFn(`<h1>⚙️ Налаштування</h1>
     <section class="card"><h3>Комп'ютерний клас</h3>
       <label>Кількість комп'ютерів (лише підказка — система питає щоразу, коли ви починаєте урок)<input type="number" id="pcs" min="1" max="60" value="${s.computers}"></label>
-      <label>Заборонені програми (кіоск закриває їх під час уроку; по одній назві процесу в рядку)<textarea id="ba" rows="6" class="mono">${esc(s.blocked_apps.join('\n'))}</textarea></label>
+      <label>Заборонені програми (кіоск закриває їх під час уроку; по одній назві процесу в рядку; Windows — <code>chrome.exe</code>, Linux — <code>chrome</code>, <code>firefox</code>)<textarea id="ba" rows="6" class="mono">${esc(s.blocked_apps.join('\n'))}</textarea></label>
       <label>Термін дії одноразового коду, хв<input type="number" id="ttl" value="${s.unlock_ttl}"></label>
       <button class="btn primary" id="sv">Зберегти</button></section>
     <section class="card"><h3>Номер цього комп'ютера (для входу з браузера без кіоску)</h3>

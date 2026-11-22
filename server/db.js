@@ -171,9 +171,18 @@ if (!setting('secret')) setSetting('secret', crypto.randomBytes(32).toString('he
 // Міграція: кількість комп'ютерів зберігається окремо для кожного уроку
 if (!all("PRAGMA table_info(sessions)").some(c => c.name === 'computers')) db.exec('ALTER TABLE sessions ADD COLUMN computers INTEGER');
 if (setting('computers') == null) setSetting('computers', 10);
+const LINUX_APPS = ['chrome', 'chromium', 'chromium-browser', 'firefox', 'firefox-bin', 'opera', 'brave', 'vivaldi-bin', 'yandex_browser',
+  'steam', 'discord', 'telegram-desktop', 'minetest', 'supertuxkart'];
 if (setting('blocked_apps') == null) {
   setSetting('blocked_apps', ['chrome.exe', 'msedge.exe', 'firefox.exe', 'opera.exe', 'browser.exe',
-    'steam.exe', 'epicgameslauncher.exe', 'minecraft.exe', 'javaw.exe', 'robloxplayerbeta.exe', 'discord.exe', 'telegram.exe']);
+    'steam.exe', 'epicgameslauncher.exe', 'minecraft.exe', 'javaw.exe', 'robloxplayerbeta.exe', 'discord.exe', 'telegram.exe', ...LINUX_APPS]);
+  setSetting('blocked_apps_linux', true);
+}
+// Назви процесів у Linux (кіоск обрізає назву до 15 символів, ".exe" ігнорується)
+if (!setting('blocked_apps_linux')) {
+  const cur = setting('blocked_apps', []);
+  setSetting('blocked_apps', [...new Set([...cur, ...LINUX_APPS])]);
+  setSetting('blocked_apps_linux', true);
 }
 
 if (!get("SELECT id FROM users WHERE role='teacher'")) {

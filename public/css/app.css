@@ -323,8 +323,9 @@ label.inline { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
   .page-head { gap: 8px; }
   .stats-row { gap: 8px; } .stat { flex: 1; padding: 10px 12px; } .stat b { font-size: 1.4rem; }
   .cards { grid-template-columns: 1fr; gap: 10px; }
-  .modal-bg { padding: 0; align-items: stretch; }
-  .modal, .modal.wide { width: 100%; min-height: 100%; border-radius: 0; padding: 18px 14px 30px; }
+  .modal-bg { padding: 0; align-items: flex-start; }
+  .modal, .modal.wide { width: 100%; min-height: 100vh; height: auto; flex: none; border-radius: 0; padding: 18px 14px 30px; }
+  .presenter .row { gap: 6px; } .presenter select { flex: 1 1 100%; min-width: 0; order: -1; } .presenter .hint { display: none; } .presenter #pp, .presenter #pnx { padding: 14px 30px; font-size: 1.35em; }
   .modal-x { font-size: 1.5rem; top: 8px; right: 10px; }
   .row { flex-wrap: wrap; } .row > input, .row > select { min-width: 0; }
   .tbl { display: block; overflow-x: auto; white-space: nowrap; }

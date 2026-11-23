@@ -307,3 +307,41 @@ a.class-card { color: var(--ink); text-decoration: none; }
 .thumb-ed .badge { position: absolute; left: 6px; top: 6px; background: rgba(0,0,0,.65); color: #fff; font-size: 11px; padding: 1px 6px; border-radius: 6px; }
 .thumb-ed .x { position: absolute; right: 4px; top: 4px; border: none; background: rgba(0,0,0,.6); color: #fff; border-radius: 50%; width: 22px; height: 22px; cursor: pointer; }
 .thumb-ed .cap { border: none; border-top: 1px solid var(--line); border-radius: 0; font-size: .8em; padding: 4px 6px; }
+
+label.inline { display: inline-flex; align-items: center; gap: 8px; margin: 0; } label.inline select { width: auto; margin: 0; }
+
+/* ---------- телефон (додаток вчителя, вузький екран) ---------- */
+@media (max-width: 700px) {
+  body { font-size: 15px; }
+  .topbar { padding: 6px 10px; gap: 8px; flex-wrap: wrap; }
+  .brand span { display: none; }
+  .topbar nav { order: 3; width: 100%; flex: none; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .topbar nav a { padding: 8px 10px; font-size: .95em; }
+  .me { margin-left: auto; } .me .btn { padding: 4px 8px; }
+  main { padding: 10px 10px 40px; }
+  h1 { font-size: 1.35rem; } .card { padding: 14px; border-radius: 12px; }
+  .page-head { gap: 8px; }
+  .stats-row { gap: 8px; } .stat { flex: 1; padding: 10px 12px; } .stat b { font-size: 1.4rem; }
+  .cards { grid-template-columns: 1fr; gap: 10px; }
+  .modal-bg { padding: 0; align-items: stretch; }
+  .modal, .modal.wide { width: 100%; min-height: 100%; border-radius: 0; padding: 18px 14px 30px; }
+  .modal-x { font-size: 1.5rem; top: 8px; right: 10px; }
+  .row { flex-wrap: wrap; } .row > input, .row > select { min-width: 0; }
+  .tbl { display: block; overflow-x: auto; white-space: nowrap; }
+  .tbl td { white-space: normal; min-width: 90px; }
+  /* урок наживо */
+  .live-head h1 { font-size: 1.2rem; }
+  .modes { width: 100%; overflow-x: auto; } .modes button { flex: 1; padding: 10px 6px; font-size: .9em; white-space: nowrap; }
+  .toolbar { gap: 6px; } .toolbar .btn { padding: 7px 10px; font-size: .88em; } .toolbar .spacer { display: none; }
+  .live { grid-template-columns: 1fr; }
+  .pc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .pc { min-height: 0; padding: 8px; } .chip { font-size: .8em; cursor: pointer; }
+  .presenter .pstage { height: 200px; }
+  .journal-wrap { max-height: 70vh; } .journal th, .journal td { padding: 5px 6px; }
+  .subs { grid-template-columns: 1fr; }
+  .step-ed { grid-template-columns: 24px 1fr; } .step-ed .col { grid-column: 2; flex-direction: row; }
+  .thumb-ed { width: 140px; }
+  .legend { gap: 8px; font-size: .8em; }
+  #toasts { left: 10px; right: 10px; bottom: 10px; max-width: none; }
+  label.switch { display: block; } label.switch input { margin-right: 6px; vertical-align: middle; }
+}

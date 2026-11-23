@@ -87,10 +87,14 @@ function connectSocket() {
   if (state.socket) return;
   const s = window.io({ transports: ['websocket', 'polling'] });
   state.socket = s;
-  s.on('notify', n => { toast(n.text, 'info', 6000); beep(); systemNotify(n.text); refreshBell(); });
+  s.on('notify', n => {
+    toast(n.text, 'info', 6000); beep(); refreshBell();
+    if (window.InfoKlasApp) { try { InfoKlasApp.notify(n.text, n.link || ''); } catch {} } else systemNotify(n.text);
+  });
   if (state.user.role === 'teacher') onTeacherSocket(s); else onStudentSocket(s);
 }
 
+if (window.InfoKlasApp) document.documentElement.classList.add('in-app');
 async function boot() {
   try {
     const me = await api('/me');

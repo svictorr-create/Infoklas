@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ІнфоКлас</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; font: 16px/1.5 system-ui, sans-serif;
+    background: linear-gradient(135deg, #3b5bdb, #7048e8); color: #1d2433; }
+  .card { background: #fff; border-radius: 20px; padding: 26px 22px; width: calc(100% - 32px); max-width: 420px; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
+  .logo { font-size: 48px; text-align: center; } h1 { text-align: center; margin: 4px 0 2px; } h1 b { color: #3b5bdb; }
+  p { color: #56607a; font-size: 14px; } label { display: block; font-weight: 600; margin-top: 14px; }
+  input { width: 100%; box-sizing: border-box; font: inherit; padding: 12px; border: 1px solid #cfd5e3; border-radius: 10px; margin-top: 6px; }
+  button { width: 100%; margin-top: 16px; padding: 14px; font: inherit; font-weight: 700; border: none; border-radius: 12px; background: #3b5bdb; color: #fff; }
+  .ex { font-size: 13px; color: #868e96; margin-top: 6px; } code { background: #eef1f7; padding: 1px 5px; border-radius: 5px; }
+</style></head>
+<body><form class="card" id="f">
+  <div class="logo">💻</div>
+  <h1>Інфо<b>Клас</b></h1>
+  <p style="text-align:center">Додаток вчителя</p>
+  <label>Адреса сервера школи
+    <input id="u" inputmode="url" autocapitalize="off" autocomplete="url" placeholder="https://infoklas.shkola.ua" required></label>
+  <div class="ex">Таку саму адресу ви відкриваєте в браузері. Наприклад <code>https://infoklas.shkola.ua</code> або в шкільній мережі <code>192.168.1.10:3000</code></div>
+  <button>Підключитися</button>
+  <p>Телефон має бути в тій самій мережі, що й сервер (шкільний Wi-Fi), або сервер має бути доступний з інтернету.</p>
+</form>
+<script>
+  const cur = new URLSearchParams(location.search).get('current') || (window.InfoKlasApp && InfoKlasApp.server()) || '';
+  document.getElementById('u').value = cur;
+  document.getElementById('f').onsubmit = e => { e.preventDefault(); InfoKlasApp.saveServer(document.getElementById('u').value); };
+</script></body></html>

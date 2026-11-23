@@ -2,3 +2,4 @@ node_modules
 data/
 kiosk/node_modules
 kiosk/dist
+dist-app/

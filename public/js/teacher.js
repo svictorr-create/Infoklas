@@ -564,12 +564,19 @@ async function livePage(id) {
     const done = new Map(st.steps.map(p => [p.step_id, p.via]));
     const m = modal(`<h3>${esc(st.name)}</h3>
       <p>${st.seat ? `ПК ${st.seat.computer_no} · ${st.seat.role === 'driver' ? '⌨️ за клавіатурою' : '🧭 штурман'}` : 'не розсаджений'} ${st.online ? '· 🟢 онлайн' : ''}</p>
+      <div class="row wrap"><label class="inline">Посадити за ПК <select id="mvpc"><option value="">—</option>${Array.from({ length: L.computers }, (_, k) => `<option value="${k + 1}" ${st.seat?.computer_no === k + 1 ? 'selected' : ''}>${k + 1}</option>`).join('')}</select></label></div>
       <div class="row wrap">${st.seat ? `<button class="btn" id="drv">⌨️ Зробити водієм</button><button class="btn ghost" id="uns">Зняти з ПК</button>` : ''}
         <a class="btn ghost" href="#/student/${st.id}">Профіль</a><a class="btn ghost" href="#/folder/${st.id}/${L.lesson?.id || ''}">📂 Папка учня</a></div>
       <h4>Кроки</h4><ol class="steps-mini">${(L.lesson?.steps || []).map(s => `<li class="${done.has(s.id) ? 'ok' : ''}">${done.get(s.id) === 'self' ? '✋' : done.get(s.id) === 'group' ? '👥' : '·'} ${esc(plainText(s.text).slice(0, 70))}</li>`).join('')}</ol>
       <h4>Вміння за цей урок</h4>
       <div class="row"><button class="btn" data-m="1">⭐ Вміє</button><button class="btn" data-m="0">⚠️ Не вміє</button><button class="btn ghost" data-m="">скинути</button></div>
       <p class="hint">Перевірка: попросіть учня показати/пояснити крок. Це найточніший спосіб дізнатися, хто вміє, а хто лише спостерігав.</p>`);
+    $('#mvpc', m.el).onchange = async e => {
+      const pc = +e.target.value || null;
+      const hasDriver = pc && L.students.some(x => x.seat?.computer_no === pc && x.seat.role === 'driver' && x.id !== sid);
+      await put(`/sessions/${id}/seating`, { student_id: sid, computer_no: pc, role: hasDriver ? 'navigator' : 'driver' });
+      m.close(); refresh(); toast(pc ? `${st.name} → ПК ${pc}` : 'Знято з ПК');
+    };
     if (st.seat) {
       $('#drv', m.el).onclick = async () => { await put(`/sessions/${id}/seating`, { student_id: sid, computer_no: st.seat.computer_no, role: 'driver' }); m.close(); refresh(); };
       $('#uns', m.el).onclick = async () => { await put(`/sessions/${id}/seating`, { student_id: sid, computer_no: null }); m.close(); refresh(); };
@@ -650,6 +657,10 @@ async function livePage(id) {
 
   async function screenPanel(resume) {
     const panel = $('#demo-panel');
+    if (!isSharing() && (!navigator.mediaDevices?.getDisplayMedia || window.InfoKlasApp)) {
+      toast('Трансляція екрана доступна лише з комп\'ютера. На телефоні використовуйте «📽 Презентація» або «👀 Увага!»', 'err', 7000);
+      return;
+    }
     if (!isSharing()) {
       try {
         await startScreenShare(() => { toast('Трансляцію зупинено'); setMode('work'); });
@@ -729,7 +740,9 @@ async function journalPage(classId) {
     const rows = [['Учень', ...J.lessons.map(l => l.title), 'За клавіатурою']];
     J.students.forEach(st => rows.push([st.name, ...J.lessons.map(l => { const c = J.cells[st.id][l.id]; return STATES[c.state].label + ((J.grades[st.id]?.[l.id] || []).length ? ' / ' + J.grades[st.id][l.id].map(g => g.value).join(',') : ''); }), `${st.driver}/${st.seated}`]));
     const csv = '﻿' + rows.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(';')).join('\n');
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `журнал-${J.cls.name}.csv`; a.click();
+    const name = `журнал-${J.cls.name}.csv`;
+    if (window.InfoKlasApp?.saveFile) { InfoKlasApp.saveFile(name, 'text/csv', btoa(String.fromCharCode(...new TextEncoder().encode(csv)))); return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = name; a.click();
   };
 }
 
@@ -869,10 +882,14 @@ async function settingsPage() {
     <section class="card"><h3>Номер цього комп'ютера (для входу з браузера без кіоску)</h3>
       <p class="muted">Відкрийте цю сторінку на кожному учнівському ПК один раз і вкажіть номер. Тоді система знатиме, хто за яким комп'ютером.</p>
       <div class="row"><input id="pcno" type="number" placeholder="напр. 5" value="${esc(localStorage.getItem('pcNo') || '')}"><button class="btn" id="svpc">Зберегти для цього браузера</button><button class="btn ghost" id="clpc">Це не класний ПК</button></div></section>
+    ${window.InfoKlasApp ? `<section class="card"><h3>📱 Додаток</h3><p>Сервер: <code>${esc(InfoKlasApp.server())}</code></p>
+      <div class="row wrap"><button class="btn" id="app-srv">✏️ Змінити адресу сервера</button><button class="btn ghost" id="app-rl">🔄 Перезавантажити</button></div></section>` : ''}
     <section class="card"><h3>Пароль вчителя</h3>
       <div class="row wrap"><input type="password" id="op" placeholder="Старий пароль"><input type="password" id="np" placeholder="Новий пароль"><button class="btn" id="cp">Змінити</button></div></section>`, '#/settings');
   $('#sv').onclick = async () => { await put('/settings', { computers: +$('#pcs').value, blocked_apps: $('#ba').value.split('\n'), unlock_ttl: +$('#ttl').value, close_kiosk_on_end: $('#cke').checked, unlock_on_start: $('#uos').checked }); toast('Збережено'); };
   $('#svpc').onclick = () => { localStorage.setItem('pcNo', $('#pcno').value); toast('Цей браузер тепер — ПК ' + $('#pcno').value); };
   $('#clpc').onclick = () => { localStorage.removeItem('pcNo'); $('#pcno').value = ''; toast('Номер ПК очищено'); };
+  $('#app-srv')?.addEventListener('click', () => InfoKlasApp.changeServer());
+  $('#app-rl')?.addEventListener('click', () => InfoKlasApp.reload());
   $('#cp').onclick = async () => { await api('/me/password', { body: { old: $('#op').value, password: $('#np').value } }); toast('Пароль змінено'); };
 }

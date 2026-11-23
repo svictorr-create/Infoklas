@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; font: 16px/1.5 system-ui, sans-serif; background: #f4f6fb; color: #1d2433; }
+  .card { background: #fff; border-radius: 18px; padding: 24px 20px; width: calc(100% - 32px); max-width: 420px; text-align: center; box-shadow: 0 6px 24px rgba(0,0,0,.08); }
+  .ic { font-size: 54px; } code { background: #eef1f7; padding: 2px 6px; border-radius: 6px; word-break: break-all; }
+  button { width: 100%; margin-top: 12px; padding: 13px; font: inherit; font-weight: 700; border-radius: 12px; border: 1px solid #cfd5e3; background: #fff; }
+  button.p { background: #3b5bdb; color: #fff; border-color: #3b5bdb; } small { color: #868e96; }
+</style></head>
+<body><div class="card">
+  <div class="ic">📡</div>
+  <h2>Немає зв'язку з сервером</h2>
+  <p>Адреса: <code id="s"></code></p>
+  <p>Перевірте, що телефон підключено до шкільного Wi-Fi або інтернету, а сервер увімкнено.</p>
+  <button class="p" onclick="InfoKlasApp.reload()">🔄 Спробувати ще раз</button>
+  <button onclick="InfoKlasApp.changeServer()">✏️ Змінити адресу сервера</button>
+  <p><small id="e"></small></p>
+</div>
+<script>
+  const q = new URLSearchParams(location.search);
+  document.getElementById('s').textContent = q.get('server') || '—';
+  document.getElementById('e').textContent = q.get('err') || '';
+</script></body></html>

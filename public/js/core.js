@@ -27,7 +27,7 @@ export function md(src) {
   let html = '', list = null, table = null;
   const inline = t => t
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, a, u) => /^(https?:|\/)/.test(u) ? `<img src="${u}" alt="${a}" class="md-img">` : m)
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, a, u) => /^(https?:|\/)/.test(u) ? mediaHtml(a, u) : m)
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, a, u) => /^(https?:|\/|#)/.test(u) ? `<a href="${u}" target="_blank" rel="noopener">${a}</a>` : m)
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>');
@@ -51,6 +51,19 @@ export function md(src) {
   return html;
 }
 
+// Зображення / відео-файл / YouTube у тексті (кроки інструкційної картки, конспект)
+export const YT_RE = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/;
+export const VIDEO_RE = /\.(mp4|webm|ogv|ogg|mov|m4v)(\?|$)/i;
+function mediaHtml(alt, url) {
+  const yt = YT_RE.exec(url);
+  const cap = alt ? `<span class="md-cap">${alt}</span>` : '';
+  if (yt) return `<span class="md-media"><span class="md-yt"><iframe src="https://www.youtube-nocookie.com/embed/${yt[1]}" allowfullscreen loading="lazy" title="${alt || 'Відео'}"></iframe></span>${cap}</span>`;
+  if (VIDEO_RE.test(url)) return `<span class="md-media"><video class="md-video" src="${url}" controls preload="metadata"></video>${cap}</span>`;
+  return `<span class="md-media"><img src="${url}" alt="${alt}" class="md-img zoomable" title="Натисни, щоб збільшити">${cap}</span>`;
+}
+// Текст кроку без медіа й розмітки — для коротких підписів
+export const plainText = t => String(t || '').replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/[*`#]/g, '').replace(/\s+/g, ' ').trim();
+
 // ---------- Тости, модальні вікна ----------
 export function toast(msg, kind = 'ok', ms = 3500) {
   let box = $('#toasts');
@@ -70,6 +83,12 @@ export function modal(html, { wide = false, onClose } = {}) {
   document.body.append(wrap);
   return { el: $('.modal', wrap), close };
 }
+// Клік по зображенню в кроці чи матеріалах — збільшити
+document.addEventListener('click', e => {
+  const img = e.target.closest?.('img.zoomable');
+  if (!img || img.closest('.modal')) return;
+  modal(`<img src="${img.src}" class="zoom-full" alt="">`, { wide: true });
+});
 export function confirmBox(text) { return Promise.resolve(window.confirm(text)); }
 
 export function fmtDate(s, withTime = false) {

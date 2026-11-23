@@ -346,11 +346,27 @@ app.post('/api/lessons/:id/import', auth, teacher, upload.single('file'), async 
     const f = req.file; if (!f) throw new Error('Файл не отримано');
     let steps = [];
     if (/\.docx$/i.test(origName(f))) {
-      const { value: html } = await mammoth.convertToHtml({ path: f.path });
-      const items = [...html.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(m => m[1]);
-      const src = items.length >= 2 ? items : [...html.matchAll(/<p>([\s\S]*?)<\/p>/g)].map(m => m[1]);
-      steps = src.map(x => x.replace(/<strong>([\s\S]*?)<\/strong>/g, '**$1**').replace(/<em>([\s\S]*?)<\/em>/g, '*$1*')
-        .replace(/<img[^>]*>/g, '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim()).filter(Boolean);
+      // картинки з картки зберігаємо й прив'язуємо до кроків
+      const { value: html } = await mammoth.convertToHtml({ path: f.path }, {
+        convertImage: mammoth.images.imgElement(async image => {
+          const buf = await image.read();
+          const ext = ((image.contentType || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg').replace(/[^a-z0-9]/g, '').slice(0, 5) || 'png';
+          const name = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+          fs.writeFileSync(path.join(UPLOADS, name), buf);
+          return { src: '/uploads/' + name };
+        }),
+      });
+      const clean = x => x.replace(/<img[^>]*src="([^"]+)"[^>]*>/g, '\n![]($1)\n')
+        .replace(/<strong>([\s\S]*?)<\/strong>/g, '**$1**').replace(/<em>([\s\S]*?)<\/em>/g, '*$1*')
+        .replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+        .split('\n').map(l => l.trim()).filter(Boolean).join('\n');
+      const blocks = [...html.matchAll(/<(li|p)>([\s\S]*?)<\/\1>/g)].map(m => ({ tag: m[1], text: clean(m[2]) })).filter(b => b.text);
+      const hasList = blocks.filter(b => b.tag === 'li').length >= 2;
+      const onlyImg = t => !t.replace(/!\[\]\([^)]*\)/g, '').trim();
+      for (const b of blocks) {
+        if (onlyImg(b.text)) { if (steps.length) steps[steps.length - 1] += '\n' + b.text; continue; } // картинка під кроком
+        if (!hasList || b.tag === 'li') steps.push(b.text);
+      }
     } else {
       steps = fs.readFileSync(f.path, 'utf8').split('\n').map(s => s.trim()).filter(Boolean);
     }
@@ -374,6 +390,12 @@ app.post('/api/lessons/:id/materials', auth, teacher, upload.single('file'), h(r
 }));
 app.delete('/api/materials/:id', auth, teacher, h(req => { run('DELETE FROM materials WHERE id=?', req.params.id); return { ok: true }; }));
 app.post('/api/upload-image', auth, teacher, upload.single('file'), h(req => ({ url: '/uploads/' + req.file.filename })));
+// Зображення або відео до кроку інструкційної картки
+app.post('/api/upload-media', auth, teacher, upload.single('file'), h(req => {
+  const f = req.file; if (!f) bad('Файл не отримано');
+  if (!/^(image|video)\//.test(f.mimetype)) { fs.unlinkSync(f.path); bad('Можна завантажити лише зображення або відео'); }
+  return { url: '/uploads/' + f.filename, kind: f.mimetype.startsWith('video') ? 'video' : 'image' };
+}));
 
 // ======================================================================
 // Заняття (урок у класі): старт, режими, відвідування, розсадка

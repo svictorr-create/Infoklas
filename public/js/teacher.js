@@ -1,5 +1,5 @@
 // Кабінет вчителя
-import { state, api, put, del, $, $$, esc, md, route, render, toast, modal, fmtDate, STATES, onLeave, pcNumber } from './core.js';
+import { state, api, put, del, $, $$, esc, md, route, render, toast, modal, fmtDate, STATES, onLeave, pcNumber, plainText, YT_RE, VIDEO_RE } from './core.js';
 import { teacherRtcInit, startScreenShare, stopScreenShare, isSharing, viewerCount, renderMaterial } from './demo.js';
 
 let shellFn = null;
@@ -36,6 +36,14 @@ export function onTeacherSocket(s) {
 
 const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' МБ' : Math.max(1, Math.round((n || 0) / 1024)) + ' КБ';
 const filesHtml = files => (files || []).length ? `<div class="files">${files.map(f => `<a class="file" href="/api/files/${f.id}">📎 ${esc(f.name)} <small>${fmtSize(f.size)}</small></a>`).join('')}</div>` : '';
+// Текст кроку <-> { body, media[] }
+const MEDIA_TOKEN = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+function splitMedia(text) {
+  const media = [...String(text || '').matchAll(MEDIA_TOKEN)].map(m => ({ alt: m[1], url: m[2] }));
+  const body = String(text || '').replace(MEDIA_TOKEN, '').replace(/\n{3,}/g, '\n\n').trim();
+  return { body, media };
+}
+const joinMedia = s => [s.body.trim(), ...s.media.map(m => `![${m.alt || ''}](${m.url})`)].filter(Boolean).join('\n');
 const debounce = (fn, ms = 300) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 // =====================================================================
@@ -266,7 +274,7 @@ async function coursePage(id) {
 
 async function lessonEditor(id) {
   const l = await api('/lessons/' + id);
-  let steps = l.steps.map(s => ({ id: s.id, text: s.text }));
+  let steps = l.steps.map(s => ({ id: s.id, ...splitMedia(s.text) }));
   const main = shellFn(`
     <div class="crumbs"><a href="#/course/${l.course_id}">${esc(l.unit_title)}</a> › редагування уроку</div>
     <div class="page-head"><h1>✏️ Урок</h1><div class="row"><button class="btn danger ghost" id="dl">Видалити урок</button><button class="btn primary big" id="save">💾 Зберегти</button></div></div>
@@ -283,7 +291,7 @@ async function lessonEditor(id) {
       <div class="page-head"><h3>📋 Інструкційна картка (кроки практичної роботи)</h3>
         <div class="row"><label class="btn sm">📥 Імпорт з DOCX/TXT<input type="file" id="imp" accept=".docx,.txt,.md" hidden></label>
           <button class="btn sm" id="bulk">📝 Вставити текстом</button></div></div>
-      <p class="hint">Пишіть короткими кроками: одна дія — один крок. Учні бачать поточний крок великим і ставлять ✓. Кнопка 🖼 вставляє зображення в крок.</p>
+      <p class="hint">Пишіть короткими кроками: одна дія — один крок. До кроку можна додати <b>зображення</b> (скриншот — просто Ctrl+V у полі кроку), <b>відео</b> або <b>YouTube</b>. Учні бачать поточний крок великим і ставлять ✓.</p>
       <div id="steps-ed"></div>
       <button class="btn" id="adds">+ Крок</button>
     </section>
@@ -306,29 +314,71 @@ async function lessonEditor(id) {
     <section class="card"><h3>🏠 Типове домашнє завдання</h3><textarea id="hw" rows="2">${esc(l.homework)}</textarea></section>
   `, '#/courses');
 
+  // Медіа кроку (зображення, відео, YouTube) зберігаються в тексті як ![підпис](адреса), а в редакторі — окремим списком
+  const mediaThumb = (m, k) => {
+    const yt = YT_RE.exec(m.url);
+    const inner = yt ? `<img src="https://img.youtube.com/vi/${yt[1]}/mqdefault.jpg" alt=""><span class="badge">▶ YouTube</span>`
+      : VIDEO_RE.test(m.url) ? `<video src="${esc(m.url)}" preload="metadata" muted></video><span class="badge">🎬 відео</span>`
+        : `<img src="${esc(m.url)}" alt="">`;
+    return `<div class="thumb-ed" data-k="${k}">${inner}<button class="x" data-rmm="${k}" title="Прибрати">✕</button>
+      <input class="cap" data-cap="${k}" value="${esc(m.alt)}" placeholder="підпис (необов'язково)"></div>`;
+  };
+  const uploadMedia = async (i, files) => {
+    const list = [...files].filter(f => /^(image|video)\//.test(f.type));
+    if (!list.length) return toast('Можна додати зображення або відео', 'err');
+    for (const f of list) {
+      if (f.type.startsWith('video') && f.size > 50 * 1024 * 1024) toast(`Завантажується відео ${Math.round(f.size / 1048576)} МБ…`, 'info', 6000);
+      const fd = new FormData(); fd.append('file', f, f.name || 'зображення.png');
+      const r = await api('/upload-media', { body: fd });
+      steps[i].media.push({ alt: '', url: r.url });
+    }
+    drawSteps();
+  };
   const drawSteps = () => {
     $('#steps-ed').innerHTML = steps.map((s, i) => `<div class="step-ed" data-i="${i}"><span class="step-n">${i + 1}</span>
-      <textarea rows="2">${esc(s.text)}</textarea>
+      <div class="step-main">
+        <textarea rows="2" placeholder="Що зробити на цьому кроці…">${esc(s.body)}</textarea>
+        ${s.media.length ? `<div class="media-ed">${s.media.map(mediaThumb).join('')}</div>` : ''}
+        <div class="step-tools">
+          <label class="btn sm">🖼 Зображення<input type="file" accept="image/*" multiple hidden data-img></label>
+          <label class="btn sm">🎬 Відео<input type="file" accept="video/*" hidden data-vid></label>
+          <button class="btn sm" data-yt>▶ YouTube</button>
+          <span class="hint">або вставте скриншот <b>Ctrl+V</b> чи перетягніть файл сюди</span>
+        </div>
+      </div>
       <div class="col"><button class="btn sm ghost" data-mv="-1" title="Вище">↑</button><button class="btn sm ghost" data-mv="1" title="Нижче">↓</button>
-      <label class="btn sm ghost" title="Вставити зображення">🖼<input type="file" accept="image/*" hidden data-img></label><button class="btn sm ghost" data-rm title="Видалити">✕</button></div></div>`).join('');
+      <button class="btn sm ghost" data-rm title="Видалити крок">✕</button></div></div>`).join('');
     $$('.step-ed').forEach(row => {
       const i = +row.dataset.i;
-      $('textarea', row).oninput = e => { steps[i].text = e.target.value; };
+      const ta = $('textarea', row);
+      ta.oninput = e => { steps[i].body = e.target.value; };
+      // Ctrl+V зі скриншотом
+      ta.addEventListener('paste', e => {
+        const files = [...(e.clipboardData?.files || [])];
+        if (files.length) { e.preventDefault(); uploadMedia(i, files); }
+      });
+      row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('drop'); });
+      row.addEventListener('dragleave', () => row.classList.remove('drop'));
+      row.addEventListener('drop', e => { e.preventDefault(); row.classList.remove('drop'); if (e.dataTransfer.files.length) uploadMedia(i, e.dataTransfer.files); });
       $$('[data-mv]', row).forEach(b => b.onclick = () => { const j = i + +b.dataset.mv; if (j < 0 || j >= steps.length) return; [steps[i], steps[j]] = [steps[j], steps[i]]; drawSteps(); });
-      $('[data-rm]', row).onclick = () => { if (!steps[i].text || confirm('Видалити крок? Відмітки учнів для нього зникнуть.')) { steps.splice(i, 1); drawSteps(); } };
-      $('[data-img]', row).onchange = async e => {
-        const fd = new FormData(); fd.append('file', e.target.files[0]);
-        const r = await api('/upload-image', { body: fd });
-        steps[i].text += `\n![](${r.url})`; drawSteps();
+      $('[data-rm]', row).onclick = () => { if (!steps[i].body && !steps[i].media.length || confirm('Видалити крок? Відмітки учнів для нього зникнуть.')) { steps.splice(i, 1); drawSteps(); } };
+      $('[data-img]', row).onchange = e => uploadMedia(i, e.target.files);
+      $('[data-vid]', row).onchange = e => uploadMedia(i, e.target.files);
+      $('[data-yt]', row).onclick = () => {
+        const u = prompt('Посилання на відео YouTube'); if (!u) return;
+        if (!YT_RE.test(u)) return toast('Це не схоже на посилання YouTube', 'err');
+        steps[i].media.push({ alt: '', url: u.trim() }); drawSteps();
       };
+      $$('[data-rmm]', row).forEach(b => b.onclick = () => { steps[i].media.splice(+b.dataset.rmm, 1); drawSteps(); });
+      $$('[data-cap]', row).forEach(c => c.oninput = () => { steps[i].media[+c.dataset.cap].alt = c.value.replace(/[\[\]]/g, ''); });
     });
   };
   drawSteps();
-  $('#adds').onclick = () => { steps.push({ text: '' }); drawSteps(); $$('.step-ed textarea').pop().focus(); };
+  $('#adds').onclick = () => { steps.push({ body: '', media: [] }); drawSteps(); $$('.step-ed textarea').pop().focus(); };
   $('#bulk').onclick = () => {
     const m = modal(`<h3>Вставити кроки текстом</h3><p class="muted">Кожен рядок (або пункт «1.», «2.») стане окремим кроком. Буде додано в кінець.</p><textarea id="bt" rows="12"></textarea><button class="btn primary" id="ok">Додати</button>`);
     $('#ok', m.el).onclick = () => {
-      $('#bt', m.el).value.split('\n').map(s => s.trim().replace(/^(\d+[.)]|[-•*])\s*/, '')).filter(Boolean).forEach(t => steps.push({ text: t }));
+      $('#bt', m.el).value.split('\n').map(s => s.trim().replace(/^(\d+[.)]|[-•*])\s*/, '')).filter(Boolean).forEach(t => steps.push(splitMedia(t)));
       m.close(); drawSteps();
     };
   };
@@ -337,11 +387,11 @@ async function lessonEditor(id) {
     const r = await api(`/lessons/${id}/import`, { body: fd });
     if (!r.steps.length) return toast('Не знайдено кроків у файлі', 'err');
     if (steps.length && !confirm(`Знайдено ${r.steps.length} кроків. Додати їх у кінець (OK) чи скасувати?`)) return;
-    r.steps.forEach(t => steps.push({ text: t })); drawSteps();
+    r.steps.forEach(t => steps.push(splitMedia(t))); drawSteps();
     toast(`Імпортовано ${r.steps.length} кроків. Не забудьте зберегти!`);
   };
-  const collect = () => ({ title: $('#t').value, objectives: $('#ob').value, why: $('#wh').value, success_criteria: $('#sc').value, theory: $('#th').value, homework: $('#hw').value, steps, questions_text: $('#qs').value });
-  $('#save').onclick = async () => { await put('/lessons/' + id, collect()); toast('Урок збережено ✓'); const fresh = await api('/lessons/' + id); steps = fresh.steps.map(s => ({ id: s.id, text: s.text })); drawSteps(); };
+  const collect = () => ({ title: $('#t').value, objectives: $('#ob').value, why: $('#wh').value, success_criteria: $('#sc').value, theory: $('#th').value, homework: $('#hw').value, steps: steps.map(s => ({ id: s.id, text: joinMedia(s) })), questions_text: $('#qs').value });
+  $('#save').onclick = async () => { await put('/lessons/' + id, collect()); toast('Урок збережено ✓'); const fresh = await api('/lessons/' + id); steps = fresh.steps.map(s => ({ id: s.id, ...splitMedia(s.text) })); drawSteps(); };
   $('#dl').onclick = async () => { if (confirm('Видалити урок?')) { await del('/lessons/' + id); location.hash = '#/course/' + l.course_id; } };
   $('#upf').onsubmit = async e => { e.preventDefault(); await put('/lessons/' + id, collect()); await api(`/lessons/${id}/materials`, { body: new FormData(e.target) }); toast('Завантажено'); render(); };
   $('#lnk').onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target); await put('/lessons/' + id, collect()); await api(`/lessons/${id}/materials`, { body: { url: f.get('url'), title: f.get('title'), kind: 'link' } }); render(); };
@@ -415,7 +465,7 @@ async function livePage(id) {
       html += `<div class="pc ${g.length ? '' : 'empty'} ${on ? 'on' : ''} ${helpOpen ? 'help' : ''} ${fin ? 'fin' : ''} ${lost ? 'lost' : ''}" data-pc="${pc}">
         <div class="pc-top"><b>ПК ${pc}${k?.name ? `<small class="host" title="Ім'я комп'ютера в Windows/Linux">${esc(k.name)}</small>` : ''}</b><span>${k ? (k.online ? `<span title="Кіоск запущено${k.locked ? ', заблоковано' : ''}">${k.locked ? '🔒' : '🖥'}</span> ` : '<span title="Кіоск не запущено" class="off">🖥</span> ') : ''}${on ? '🟢' : '⚪'}${helpOpen ? ' 🙋' : ''}${fin ? ' ✅' : ''}${lost ? ' ⚠️' : ''}</span></div>
         <div class="chips">${g.map(st => chip(st)).join('') || '<span class="muted small">вільний</span>'}</div>
-        ${g.length && total ? `<div class="progress thin"><div style="width:${prog / total * 100}%"></div></div><div class="small muted">${prog}/${total}${prog < total && L.lesson.steps[prog] ? ' · ' + esc(L.lesson.steps[prog].text.replace(/[*`#!\[\]]/g, '').slice(0, 40)) : ''}</div>` : ''}
+        ${g.length && total ? `<div class="progress thin"><div style="width:${prog / total * 100}%"></div></div><div class="small muted">${prog}/${total}${prog < total && L.lesson.steps[prog] ? ' · ' + esc(plainText(L.lesson.steps[prog].text).slice(0, 40)) : ''}</div>` : ''}
       </div>`;
     }
     $('#grid').innerHTML = html;
@@ -430,7 +480,7 @@ async function livePage(id) {
     const open = L.help.filter(h => h.status === 'open');
     $('#hq-n').textContent = open.length ? `(${open.length})` : '';
     $('#helpq').innerHTML = open.map(h => `<div class="hq" data-h="${h.id}"><b>${esc(h.name)}</b>${h.computer_no ? ` · ПК ${h.computer_no}` : ''} · крок ${h.step_pos}
-      <div class="small">${esc(h.step_text.slice(0, 80))}</div>${h.question ? `<div class="q">«${esc(h.question)}»</div>` : ''}${h.existing.length ? `<small class="muted">є ${h.existing.length} поясн.</small>` : ''}</div>`).join('') || '<p class="muted small">Немає</p>';
+      <div class="small">${esc(plainText(h.step_text).slice(0, 80))}</div>${h.question ? `<div class="q">«${esc(h.question)}»</div>` : ''}${h.existing.length ? `<small class="muted">є ${h.existing.length} поясн.</small>` : ''}</div>`).join('') || '<p class="muted small">Немає</p>';
 
     // --- Завершили ---
     $('#fins').innerHTML = L.finishes.map(f => `<div class="fin-row" data-f="${f.id}">${f.file ? `<img src="${esc(f.file)}" class="thumb">` : ''}<div><b>${esc(f.name)}</b> <small class="muted">${fmtDate(f.created_at, true)}</small>${f.text ? `<div class="small">«${esc(f.text)}»</div>` : ''}${f.files?.length ? `<div class="small">📎 ${f.files.map(x => esc(x.name)).join(', ')}</div>` : ''}</div></div>`).join('') || '<p class="muted small">Поки ніхто</p>';
@@ -516,7 +566,7 @@ async function livePage(id) {
       <p>${st.seat ? `ПК ${st.seat.computer_no} · ${st.seat.role === 'driver' ? '⌨️ за клавіатурою' : '🧭 штурман'}` : 'не розсаджений'} ${st.online ? '· 🟢 онлайн' : ''}</p>
       <div class="row wrap">${st.seat ? `<button class="btn" id="drv">⌨️ Зробити водієм</button><button class="btn ghost" id="uns">Зняти з ПК</button>` : ''}
         <a class="btn ghost" href="#/student/${st.id}">Профіль</a><a class="btn ghost" href="#/folder/${st.id}/${L.lesson?.id || ''}">📂 Папка учня</a></div>
-      <h4>Кроки</h4><ol class="steps-mini">${(L.lesson?.steps || []).map(s => `<li class="${done.has(s.id) ? 'ok' : ''}">${done.get(s.id) === 'self' ? '✋' : done.get(s.id) === 'group' ? '👥' : '·'} ${esc(s.text.slice(0, 70))}</li>`).join('')}</ol>
+      <h4>Кроки</h4><ol class="steps-mini">${(L.lesson?.steps || []).map(s => `<li class="${done.has(s.id) ? 'ok' : ''}">${done.get(s.id) === 'self' ? '✋' : done.get(s.id) === 'group' ? '👥' : '·'} ${esc(plainText(s.text).slice(0, 70))}</li>`).join('')}</ol>
       <h4>Вміння за цей урок</h4>
       <div class="row"><button class="btn" data-m="1">⭐ Вміє</button><button class="btn" data-m="0">⚠️ Не вміє</button><button class="btn ghost" data-m="">скинути</button></div>
       <p class="hint">Перевірка: попросіть учня показати/пояснити крок. Це найточніший спосіб дізнатися, хто вміє, а хто лише спостерігав.</p>`);
@@ -637,7 +687,7 @@ async function helpPage() {
   const list = await api('/help');
   const main = shellFn(`<h1>🙋 Запитання учнів</h1><p class="muted">Включно з тими, хто працює вдома. Пояснення зберігаються до кроку й допомагають усім.</p>
     ${list.map(h => `<div class="card hq" data-h="${h.id}"><b>${esc(h.name)}</b> · ${esc(h.lesson_title)} · крок ${h.step_pos} <small class="muted">${fmtDate(h.created_at, true)}</small>
-      <div class="small">${esc(h.step_text.slice(0, 120))}</div>${h.question ? `<div class="q">«${esc(h.question)}»</div>` : ''}</div>`).join('') || '<p class="muted">Усі запитання мають відповіді 👍</p>'}`, '#/help');
+      <div class="small">${esc(plainText(h.step_text).slice(0, 120))}</div>${h.question ? `<div class="q">«${esc(h.question)}»</div>` : ''}</div>`).join('') || '<p class="muted">Усі запитання мають відповіді 👍</p>'}`, '#/help');
   $$('.hq', main).forEach(x => x.onclick = () => answerDialog(list.find(h => h.id === +x.dataset.h), render));
   onLeave(listen('live', debounce(() => location.hash === '#/help' && render(), 500)));
 }

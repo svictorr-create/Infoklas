@@ -55,14 +55,14 @@ function findBlocked(list, blocked) {
 
 // ---------- Автозапуск ----------
 function setAutostart(app, enable = true, appName = 'infoklas-kiosk') {
-  if (!isLinux) { app.setLoginItemSettings({ openAtLogin: enable }); return; }
+  if (!isLinux) { app.setLoginItemSettings({ openAtLogin: enable, args: ['--from-login'] }); return; }
   // AppImage передає свій шлях у $APPIMAGE; для .deb — шлях до виконуваного файлу
   const exec = process.env.APPIMAGE || process.execPath;
   const file = path.join(os.homedir(), '.config', 'autostart', appName + '.desktop');
   if (!enable) { try { fs.unlinkSync(file); } catch {} return; }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, [
-    '[Desktop Entry]', 'Type=Application', 'Name=InfoKlas Kiosk', `Exec="${exec}"`,
+    '[Desktop Entry]', 'Type=Application', 'Name=InfoKlas Kiosk', `Exec="${exec}" --from-login`,
     'X-GNOME-Autostart-enabled=true', 'X-GNOME-Autostart-Delay=2', 'NoDisplay=true', 'Terminal=false', '',
   ].join('\n'));
 }

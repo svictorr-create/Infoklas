@@ -23,12 +23,14 @@ const { io } = require('socket.io-client');
 /*
  * Параметри запуску:
  *   --open            одразу показати вхід учня (без коду) — зручно, коли вчитель сам запускає кіоск через Veyon
+ *   --from-login      кіоск запущено автозапуском в обліковому записі учня: після уроку він блокується, а не закривається
  *   --autostart=on    вмикає автозапуск з входом у систему (--autostart=off — вимикає)
  *   --restore-keys    лише повернути системні комбінації клавіш (Linux) і вийти — запускається при вході учня в систему
  */
 const ARGS = process.argv.slice(1);
 const hasArg = a => ARGS.includes(a);
 const START_OPEN = hasArg('--open');
+const FROM_LOGIN = hasArg('--from-login');
 
 const CFG_FILE = path.join(app.getPath('userData'), 'config.json');
 let cfg = {};
@@ -165,7 +167,11 @@ function connect() {
   });
   socket.on('device:lock', () => showLock());
   socket.on('device:unlock', () => { if (locked) showApp(); });
-  socket.on('device:exit', () => { allowQuit = true; app.quit(); });
+  socket.on('device:exit', info => {
+    // Кінець уроку: кіоск з автозапуску (обліковий запис учня) лише блокується, щоб ПК не лишався «вільним»
+    if (info?.reason === 'lesson-end' && FROM_LOGIN) { showLock(); return; }
+    allowQuit = true; app.quit();
+  });
   socket.on('policy', p => { blockedApps = p.blocked_apps || []; });
   socket.on('lab:mode', m => {
     labMode = m.mode || 'none';

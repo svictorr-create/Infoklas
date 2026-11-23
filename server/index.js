@@ -416,6 +416,11 @@ app.post('/api/sessions', auth, teacher, h(req => {
   const lesson = get('SELECT title FROM lessons WHERE id=?', lesson_id);
   io.to('class:' + class_id).emit('session', { id, lesson_id, mode: 'work', title: lesson?.title });
   io.to('devices').emit('lab:mode', { mode: 'work', session_id: id });
+  // Кіоски, що стартували заблокованими (автозапуск в обліковому записі учня), розблоковуються на початку уроку
+  if (setting('unlock_on_start', true)) {
+    run('UPDATE devices SET locked=0');
+    io.to('devices').emit('device:unlock');
+  }
   return { id };
 }));
 function endSession(id) {
@@ -431,7 +436,7 @@ function endSession(id) {
 function closeKiosksAfterLesson() {
   if (!setting('close_kiosk_on_end', true)) return;
   for (const id of deviceSockets.keys()) expectedExit.add(id);
-  io.to('devices').emit('device:exit');
+  io.to('devices').emit('device:exit', { reason: 'lesson-end' }); // кіоски з автозапуску лише блокуються
 }
 app.post('/api/sessions/:id/end', auth, teacher, h(req => { endSession(+req.params.id); return { ok: true }; }));
 // Урок зірвано/не відбувся (повітряна тривога тощо) — фіксуємо, прогрес не втрачається
@@ -1016,12 +1021,13 @@ app.post('/api/notifications/read', auth, h(req => { run('UPDATE notifications S
 // ======================================================================
 // Налаштування, кіоск-пристрої, коди розблокування
 // ======================================================================
-app.get('/api/settings', auth, teacher, h(() => ({ computers: setting('computers', 10), blocked_apps: setting('blocked_apps', []), unlock_ttl: setting('unlock_ttl', 15), close_kiosk_on_end: setting('close_kiosk_on_end', true) })));
+app.get('/api/settings', auth, teacher, h(() => ({ computers: setting('computers', 10), blocked_apps: setting('blocked_apps', []), unlock_ttl: setting('unlock_ttl', 15), close_kiosk_on_end: setting('close_kiosk_on_end', true), unlock_on_start: setting('unlock_on_start', true) })));
 app.put('/api/settings', auth, teacher, h(req => {
   const b = req.body;
   if (b.computers != null) setSetting('computers', Math.max(1, Math.min(60, parseInt(b.computers, 10) || 1)));
   if (Array.isArray(b.blocked_apps)) { setSetting('blocked_apps', b.blocked_apps.map(s => s.trim().toLowerCase()).filter(Boolean)); io.to('devices').emit('policy', { blocked_apps: setting('blocked_apps') }); }
   if (b.close_kiosk_on_end != null) setSetting('close_kiosk_on_end', !!b.close_kiosk_on_end);
+  if (b.unlock_on_start != null) setSetting('unlock_on_start', !!b.unlock_on_start);
   if (b.unlock_ttl != null) setSetting('unlock_ttl', Math.max(1, parseInt(b.unlock_ttl, 10) || 15));
   return { ok: true };
 }));

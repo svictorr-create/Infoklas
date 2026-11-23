@@ -3,12 +3,13 @@
   Запуск: правою кнопкою на PowerShell → «Запустити від імені адміністратора», потім:
 
     Set-ExecutionPolicy -Scope Process Bypass -Force
-    .\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.1.0.exe"
+    .\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.2.0.exe"
 
-  Кіоск НЕ стартує сам: вчитель запускає його через Veyon → «Запустити програму»:
-    "C:\Program Files\InfoKlas Kiosk\InfoKlas Kiosk.exe" --open
-  Додаткові параметри:  -AutoLogin  (Windows одразу входить в обліковий запис учня)
-                        -AutoStart  (кіоск запускається сам під час входу учня, заблокованим)
+  Кіоск стартує САМ, коли учень входить в обліковий запис "uchen" (заблокованим);
+  розблоковується, коли вчитель натискає «Почати урок», і знову блокується після «Завершити урок».
+  Інших облікових записів (вчителів) це не стосується.
+  Додаткові параметри:  -AutoLogin    (Windows одразу входить в обліковий запис учня)
+                        -NoAutoStart  (не запускати кіоск автоматично — лише вручну через Veyon)
 
   Що робить:
    1. тихо встановлює кіоск-клієнт;
@@ -16,13 +17,13 @@
    3. для учня вимикає: Диспетчер задач, командний рядок, редактор реєстру, Панель керування,
       «Виконати…», блокування та зміну пароля (Ctrl+Alt+Del);
    4. ховає «Змінити користувача»;
-   5. з -AutoLogin — Windows одразу входить в обліковий запис учня; з -AutoStart — кіоск стартує сам.
+   5. додає кіоск в автозапуск облікового запису учня; з -AutoLogin — Windows одразу входить в обліковий запис учня.
 #>
 param(
   [string]$Installer = "",
   [string]$Student = "uchen",
   [switch]$AutoLogin,
-  [switch]$AutoStart
+  [switch]$NoAutoStart
 )
 $ErrorActionPreference = "Stop"
 
@@ -84,9 +85,9 @@ try {
   Set-Reg $exp "NoRun" 1                     # Win+R
   Set-Reg $exp "NoControlPanel" 1            # Панель керування і Параметри
   Set-Reg "$root\Software\Policies\Microsoft\Windows\System" "DisableCMD" 1   # командний рядок
-  # Автозапуск кіоску — лише за бажанням (-AutoStart); інакше прибираємо, якщо був
+  # Автозапуск кіоску в обліковому записі учня (заблокованим); -NoAutoStart — вимкнути
   $run = "$root\Software\Microsoft\Windows\CurrentVersion\Run"
-  if ($AutoStart -and (Test-Path $KioskExe)) { Set-Reg $run "InfoKlasKiosk" "`"$KioskExe`"" "String" }
+  if (-not $NoAutoStart -and (Test-Path $KioskExe)) { Set-Reg $run "InfoKlasKiosk" "`"$KioskExe`" --from-login" "String" }
   elseif (Test-Path $run) { Remove-ItemProperty -Path $run -Name "InfoKlasKiosk" -ErrorAction SilentlyContinue }
 } finally {
   [gc]::Collect(); Start-Sleep -Milliseconds 500

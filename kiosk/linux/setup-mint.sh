@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 # ІнфоКлас — підготовка учнівського ПК з Linux Mint (Cinnamon / Xfce / MATE).
-# Запуск (від адміністратора):   sudo bash setup-mint.sh infoklas-kiosk_1.1.0_amd64.deb [--autologin] [--autostart]
+# Запуск (від адміністратора):   sudo bash setup-mint.sh infoklas-kiosk_1.2.0_amd64.deb [--autologin] [--no-autostart]
 #
 # Що робить:
 #  1. встановлює кіоск-клієнт з .deb;
 #  2. створює обліковий запис учня "uchen" БЕЗ прав адміністратора (якщо його немає);
 #  3. вимикає перемикання в текстові консолі (Ctrl+Alt+F1…F6) і аварійне вбивство X (Ctrl+Alt+Backspace);
 #  4. вимикає гостьовий сеанс; з --autologin — ПК після ввімкнення одразу входить у "uchen";
-#  5. кіоск НЕ стартує сам — вчитель запускає його через Veyon (`infoklas-kiosk --open`).
-#     При вході учня лише відновлюються системні клавіші, якщо кіоск минулого разу завершився аварійно.
-#     З --autostart кіоск запускатиметься автоматично під час входу (заблокованим).
+#  5. кіоск стартує САМ, коли учень входить у "uchen" (заблокованим); розблоковується, коли вчитель
+#     натискає «Почати урок», і знову блокується після «Завершити урок». Інших облікових записів це не стосується.
+#     З --no-autostart кіоск запускає лише вчитель (Veyon: `infoklas-kiosk --open`).
 set -euo pipefail
 
 STUDENT=uchen
 DEB="${1:-}"
 AUTOLOGIN=0
-AUTOSTART=0
+AUTOSTART=1
 for a in "$@"; do
   [ "$a" = "--autologin" ] && AUTOLOGIN=1
-  [ "$a" = "--autostart" ] && AUTOSTART=1
+  [ "$a" = "--no-autostart" ] && AUTOSTART=0
 done
 case "$DEB" in --*) DEB="" ;; esac  # перший аргумент — параметр, а не файл
 
-if [ "$(id -u)" -ne 0 ]; then echo "Запустіть через sudo: sudo bash $0 файл.deb [--autologin] [--autostart]"; exit 1; fi
+if [ "$(id -u)" -ne 0 ]; then echo "Запустіть через sudo: sudo bash $0 файл.deb [--autologin] [--no-autostart]"; exit 1; fi
 
 echo "== 1. Встановлення кіоску"
 if [ -n "$DEB" ] && [ -f "$DEB" ]; then
@@ -62,7 +62,7 @@ mkdir -p /etc/lightdm/lightdm.conf.d
 } > /etc/lightdm/lightdm.conf.d/90-infoklas.conf
 [ "$AUTOLOGIN" = 1 ] && echo "   Автовхід у $STUDENT увімкнено."
 
-if [ "$AUTOSTART" = 1 ]; then KIOSK_EXEC="\"$KIOSK_BIN\""; NAME="InfoKlas Kiosk"
+if [ "$AUTOSTART" = 1 ]; then KIOSK_EXEC="\"$KIOSK_BIN\" --from-login"; NAME="InfoKlas Kiosk"
 else KIOSK_EXEC="\"$KIOSK_BIN\" --restore-keys"; NAME="InfoKlas: відновлення клавіш"; fi
 echo "== 5. Вхід учня: $NAME"
 HOME_DIR="$(getent passwd "$STUDENT" | cut -d: -f6)"

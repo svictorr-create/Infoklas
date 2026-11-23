@@ -819,8 +819,9 @@ async function devicesPage() {
   const main = shellFn(`
     <div class="page-head"><h1>🔒 Комп'ютери класу (Lockdown)</h1>
       <div class="row"><button class="btn" id="lockall">🔒 Заблокувати всі</button><button class="btn" id="unlockall">🔓 Розблокувати всі</button><button class="btn" id="exitall">⏏ Закрити кіоск на всіх</button></div></div>
-    <section class="card"><h3>▶ Запуск кіоску через Veyon</h3>
-      <p class="muted">Veyon → виділіть комп'ютери → <b>«Запустити програму»</b> і вставте команду (збережіть її у Veyon, щоб наступного разу обрати зі списку):</p>
+    <section class="card"><h3>▶ Запуск кіоску</h3>
+      <p><b>Автоматично:</b> в обліковому записі учня <code>uchen</code> кіоск стартує сам (заблокованим), розблоковується, коли ви натискаєте «▶ Почати урок», і знову блокується після «🏁 Завершити урок».</p>
+      <p class="muted"><b>Вручну (запасний варіант):</b> Veyon → виділіть комп'ютери → <b>«Запустити програму»</b> і вставте команду:</p>
       <p>Windows: <code>"C:\\Program Files\\InfoKlas Kiosk\\InfoKlas Kiosk.exe" --open</code></p>
       <p>Linux Mint: <code>infoklas-kiosk --open</code></p>
       <p class="hint"><code>--open</code> — учні одразу бачать вхід. Без нього кіоск стартує заблокованим, і ви розблоковуєте ПК звідси чи з уроку. Після «Завершити урок» кіоски закриваються самі (вимикається в ⚙️).</p></section>
@@ -862,14 +863,15 @@ async function settingsPage() {
       <label>Кількість комп'ютерів (лише підказка — система питає щоразу, коли ви починаєте урок)<input type="number" id="pcs" min="1" max="60" value="${s.computers}"></label>
       <label>Заборонені програми (кіоск закриває їх під час уроку; по одній назві процесу в рядку; Windows — <code>chrome.exe</code>, Linux — <code>chrome</code>, <code>firefox</code>)<textarea id="ba" rows="6" class="mono">${esc(s.blocked_apps.join('\n'))}</textarea></label>
       <label>Термін дії одноразового коду, хв<input type="number" id="ttl" value="${s.unlock_ttl}"></label>
-      <label class="switch"><input type="checkbox" id="cke" ${s.close_kiosk_on_end ? 'checked' : ''}> Закривати кіоск на всіх ПК після «Завершити урок» (комп'ютери звільняються для інших вчителів)</label><br><br>
+      <label class="switch"><input type="checkbox" id="uos" ${s.unlock_on_start ? 'checked' : ''}> Розблоковувати кіоски, коли я натискаю «▶ Почати урок»</label><br><br>
+      <label class="switch"><input type="checkbox" id="cke" ${s.close_kiosk_on_end ? 'checked' : ''}> Після «🏁 Завершити урок»: кіоск з автозапуску (обліковий запис <code>uchen</code>) <b>блокується</b>, запущений вручну через Veyon — <b>закривається</b></label><br><br>
       <button class="btn primary" id="sv">Зберегти</button></section>
     <section class="card"><h3>Номер цього комп'ютера (для входу з браузера без кіоску)</h3>
       <p class="muted">Відкрийте цю сторінку на кожному учнівському ПК один раз і вкажіть номер. Тоді система знатиме, хто за яким комп'ютером.</p>
       <div class="row"><input id="pcno" type="number" placeholder="напр. 5" value="${esc(localStorage.getItem('pcNo') || '')}"><button class="btn" id="svpc">Зберегти для цього браузера</button><button class="btn ghost" id="clpc">Це не класний ПК</button></div></section>
     <section class="card"><h3>Пароль вчителя</h3>
       <div class="row wrap"><input type="password" id="op" placeholder="Старий пароль"><input type="password" id="np" placeholder="Новий пароль"><button class="btn" id="cp">Змінити</button></div></section>`, '#/settings');
-  $('#sv').onclick = async () => { await put('/settings', { computers: +$('#pcs').value, blocked_apps: $('#ba').value.split('\n'), unlock_ttl: +$('#ttl').value, close_kiosk_on_end: $('#cke').checked }); toast('Збережено'); };
+  $('#sv').onclick = async () => { await put('/settings', { computers: +$('#pcs').value, blocked_apps: $('#ba').value.split('\n'), unlock_ttl: +$('#ttl').value, close_kiosk_on_end: $('#cke').checked, unlock_on_start: $('#uos').checked }); toast('Збережено'); };
   $('#svpc').onclick = () => { localStorage.setItem('pcNo', $('#pcno').value); toast('Цей браузер тепер — ПК ' + $('#pcno').value); };
   $('#clpc').onclick = () => { localStorage.removeItem('pcNo'); $('#pcno').value = ''; toast('Номер ПК очищено'); };
   $('#cp').onclick = async () => { await api('/me/password', { body: { old: $('#op').value, password: $('#np').value } }); toast('Пароль змінено'); };

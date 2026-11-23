@@ -169,8 +169,13 @@ async function lessonPage(id) {
   });
   drawSteps();
   drawWork();
-  if (state.kiosk?.folder) prepareFolder().then(drawWork).catch(e => console.warn(e));
-  onLeave(() => { cur = null; });
+  let sync = null;
+  if (state.kiosk?.folder) {
+    prepareFolder().then(drawWork).catch(e => console.warn(e));
+    // Автосинхронізація: вчитель бачить актуальні документи учня ще до «Я закінчив»
+    sync = setInterval(() => { if (cur?.id === l.id) sendFolderResults('quiet').then(n => n && drawWork()).catch(() => {}); }, 60000);
+  }
+  onLeave(() => { cur = null; if (sync) clearInterval(sync); });
 }
 async function reloadLesson() {
   if (!cur) return;
@@ -319,7 +324,7 @@ async function prepareFolder() {
 async function uploadResults(items, finishing) {
   const fd = new FormData();
   items.forEach(i => fd.append('files', i.blob || new Blob([i.data]), i.name));
-  if (finishing) fd.append('finishing', '1');
+  if (finishing === 'quiet') fd.append('quiet', '1'); else if (finishing) fd.append('finishing', '1');
   const r = await api(`/lessons/${cur.id}/my-files`, { body: fd });
   cur.my_files = r.files;
   return r;
@@ -353,7 +358,7 @@ function drawWork() {
     ${mine.length ? `<div class="files">${mine.map(f => `<span class="file ${f.submission_id ? 'done' : ''}">${f.submission_id ? '✅' : '📤'} <a href="/api/files/${f.id}">${esc(f.name)}</a> <small>${fmtSize(f.size)}${f.author !== state.user.name ? ' · ' + esc(f.author) : ''}</small>
       ${!f.submission_id && f.author === state.user.name ? `<button class="x" data-delfile="${f.id}" title="Прибрати">✕</button>` : ''}</span>`).join('')}</div>` : ''}
     ${kiosk ? `<div class="row wrap"><button class="btn" id="send-folder">📤 Надіслати нові файли з папки</button></div>
-      <p class="hint">Зберігай свою роботу <b>у цю папку</b> (Файл → Зберегти як → Документи › InfoKlas). Коли натиснеш «Я закінчив», нові й змінені файли самі надійдуть вчителю.</p>`
+      <p class="hint">Зберігай свою роботу <b>у цю папку</b> (Файл → Зберегти як → Документи › InfoKlas). Вчитель бачить твою папку: файли надсилаються самі щохвилини і коли ти натиснеш «Я закінчив».</p>`
     : `<form id="up-form" class="row wrap"><input type="file" name="files" multiple required><button class="btn">📤 Надіслати вчителю</button></form>
       <p class="hint">Працюєш вдома? Завантаж файли для роботи, виконай завдання і надішли результат тут.</p>`}`;
   if (keep) $('#up-form', box)?.replaceWith(keep);

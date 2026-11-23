@@ -275,3 +275,9 @@ a.class-card { color: var(--ink); text-decoration: none; }
 .link-row { padding: 6px 0; border-bottom: 1px dashed var(--line); }
 .link-live { display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: .88em; }
 .link-live a { word-break: break-all; }
+
+/* папка учня */
+.folder-link { text-decoration: none !important; margin-left: 4px; opacity: .75; } .folder-link:hover { opacity: 1; }
+.folder-lesson.hl { box-shadow: 0 0 0 3px var(--pri-2), var(--sh); }
+.dim-row td { opacity: .55; }
+.preview-frame { width: 100%; height: 65vh; border: 1px solid var(--line); border-radius: 10px; background: #fff; }

@@ -694,7 +694,7 @@ app.post('/api/lessons/:id/my-files', auth, upload.array('files', 40), h(req => 
     ids.push(Number(run('INSERT INTO student_files(student_id,lesson_id,session_id,name,stored,size,group_ids) VALUES(?,?,?,?,?,?,?)',
       req.user.id, lid, inClass ? sess.id : null, name, stored, f.size, JSON.stringify(group)).lastInsertRowid));
   }
-  if (!req.body.finishing) {
+  if (!req.body.finishing && !req.body.quiet) {
     const title = get('SELECT title FROM lessons WHERE id=?', lid).title;
     notifyTeachers(`📎 ${req.pc ? 'ПК ' + req.pc + ': ' : '🏠 '}${req.user.name} надіслав(ла) ${files.length} файл(и) — «${title}»`, inClass ? `#/live/${sess.id}` : '#/submissions');
   }
@@ -715,6 +715,73 @@ app.get('/api/files/:id', auth, (req, res) => {
   if (!allowed) return res.status(404).json({ error: 'Файл не знайдено' });
   res.setHeader('Content-Disposition', `${req.query.view ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.name)}`);
   res.sendFile(f.stored);
+});
+// ======================================================================
+// Папка учня для вчителя: копія Документи/InfoKlas/<Учень> на сервері (синхронізує кіоск)
+// ======================================================================
+app.get('/api/students/:id/folder', auth, teacher, h(req => {
+  const st = get("SELECT id, name, class_id FROM users WHERE id=? AND role='student'", req.params.id);
+  if (!st) bad('Учня не знайдено');
+  const cls = get('SELECT * FROM classes WHERE id=?', st.class_id);
+  const rows = all(`SELECT f.id, f.name, f.size, f.created_at, f.submission_id, f.lesson_id, f.student_id, u.name author, l.title lesson_title
+    FROM student_files f JOIN users u ON u.id=f.student_id JOIN lessons l ON l.id=f.lesson_id
+    WHERE f.student_id=? OR EXISTS (SELECT 1 FROM json_each(COALESCE(f.group_ids,'[]')) WHERE value=?)
+    ORDER BY f.id DESC`, st.id, st.id);
+  const lessons = new Map();
+  for (const f of rows) {
+    if (!lessons.has(f.lesson_id)) lessons.set(f.lesson_id, { lesson_id: f.lesson_id, title: f.lesson_title, files: [], seen: new Set() });
+    const L = lessons.get(f.lesson_id);
+    const key = f.author + '/' + f.name;
+    f.old = L.seen.has(key); // старіша версія того самого файлу
+    L.seen.add(key);
+    L.files.push(f);
+  }
+  const last = get(`SELECT MAX(created_at) t FROM student_files WHERE student_id=?`, st.id)?.t;
+  return { student: st, cls, last_sync: last, lessons: [...lessons.values()].map(({ seen, ...x }) => x) };
+}));
+// Перегляд документа в браузері: Word (.docx), PDF, зображення, текст і код
+const TEXT_EXT = /\.(txt|csv|md|py|js|html?|css|json|xml|pas|cpp|c|h|java|cs|php|sql|ini|log|bat|sh)$/i;
+app.get('/api/files/:id/preview', auth, teacher, async (req, res) => {
+  try {
+    const f = get('SELECT * FROM student_files WHERE id=?', req.params.id);
+    if (!f || !fs.existsSync(f.stored)) return res.status(404).send('Файл не знайдено');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src data: 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'");
+    const page = body => `<!doctype html><meta charset="utf-8"><style>body{font:15px/1.55 system-ui,"Segoe UI",sans-serif;max-width:860px;margin:24px auto;padding:0 24px;color:#1d2433}
+      pre{white-space:pre-wrap;font:13px/1.5 ui-monospace,Consolas,monospace;background:#f6f8fd;padding:14px;border-radius:8px}
+      table{border-collapse:collapse}td,th{border:1px solid #ccd;padding:4px 8px}img{max-width:100%}</style>${body}`;
+    if (/\.docx$/i.test(f.name)) {
+      const { value } = await require('mammoth').convertToHtml({ path: f.stored });
+      return res.type('html').send(page(value || '<p><i>Документ порожній</i></p>'));
+    }
+    if (TEXT_EXT.test(f.name) || f.size === 0) {
+      const t = fs.readFileSync(f.stored).toString('utf8').slice(0, 500000);
+      return res.type('html').send(page(`<pre>${t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</pre>`));
+    }
+    if (/\.(png|jpe?g|gif|webp|bmp|svg|pdf)$/i.test(f.name)) {
+      res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(f.name)}`);
+      return res.sendFile(f.stored);
+    }
+    res.status(415).type('html').send(page(`<p>Цей тип файлу не можна переглянути в браузері. Завантажте його і відкрийте у відповідній програмі.</p>`));
+  } catch (e) { res.status(500).send(e.message); }
+});
+// Уся папка учня одним ZIP: <Урок>/<файли> (лише найновіші версії)
+app.get('/api/students/:id/folder.zip', auth, teacher, (req, res) => {
+  const st = get("SELECT id, name FROM users WHERE id=? AND role='student'", req.params.id);
+  if (!st) return res.status(404).json({ error: 'Учня не знайдено' });
+  const rows = all(`SELECT f.*, l.title lesson_title FROM student_files f JOIN lessons l ON l.id=f.lesson_id
+    WHERE (f.student_id=? OR EXISTS (SELECT 1 FROM json_each(COALESCE(f.group_ids,'[]')) WHERE value=?)) ${req.query.lesson_id ? 'AND f.lesson_id=' + parseInt(req.query.lesson_id, 10) : ''}
+    ORDER BY f.id DESC`, st.id, st.id);
+  const seen = new Set(), entries = [];
+  for (const f of rows) {
+    const n = `${safeName(f.lesson_title)}/${safeName(f.name, 120)}`;
+    if (seen.has(n) || !fs.existsSync(f.stored)) continue;
+    seen.add(n);
+    entries.push({ name: n, data: fs.readFileSync(f.stored), date: new Date(f.created_at.replace(' ', 'T') + 'Z') });
+  }
+  if (!entries.length) return res.status(404).json({ error: 'У папці ще немає файлів' });
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(safeName(st.name) + '.zip')}`);
+  res.end(makeZip(entries));
 });
 // Усі результати уроку для класу одним ZIP: <Учень>/<файли> + знімок екрана
 app.get('/api/lessons/:id/results.zip', auth, teacher, (req, res) => {

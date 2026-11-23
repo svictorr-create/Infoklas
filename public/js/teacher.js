@@ -12,6 +12,8 @@ export function registerTeacher(shell) {
   route('/', classesPage);
   route('/class/:id', classPage);
   route('/student/:id', studentProfile);
+  route('/folder/:id', id => folderPage(id));
+  route('/folder/:id/:lesson', (id, lesson) => folderPage(id, lesson));
   route('/courses', coursesPage);
   route('/course/:id', coursePage);
   route('/lesson-edit/:id', lessonEditor);
@@ -168,7 +170,7 @@ async function studentProfile(id) {
   const main = shellFn(`
     <div class="crumbs"><a href="#/class/${d.cls?.id}">${esc(d.cls?.name || '')}</a> › ${esc(d.student.name)}</div>
     <h1>${esc(d.student.name)}</h1>
-    <p>Логін <code>${esc(d.student.login)}</code> · пароль <code>${esc(d.student.pw_plain || '')}</code></p>
+    <p>Логін <code>${esc(d.student.login)}</code> · пароль <code>${esc(d.student.pw_plain || '')}</code> · <a class="btn sm" href="#/folder/${d.student.id}">📂 Папка учня</a></p>
     <div class="legend">${Object.entries(counts).map(([k, n]) => `<span><span class="st ${STATES[k].cls}">${STATES[k].icon}</span> ${STATES[k].label}: <b>${n}</b></span>`).join('')}</div>
     <div class="grid2">
       <section class="card"><h3>Уроки</h3><table class="tbl compact">${d.lessons.map(l => `<tr><td><span class="st ${STATES[l.status?.state || 'none'].cls}">${STATES[l.status?.state || 'none'].icon}</span></td>
@@ -179,6 +181,40 @@ async function studentProfile(id) {
       <section class="card"><h3>Входи в систему</h3><table class="tbl compact">${d.logins.map(l => `<tr><td>${fmtDate(l.at, true)}</td><td>${l.place === 'home' ? '🏠 вдома' : '🏫 ПК ' + l.computer_no + (l.host ? ' · ' + esc(l.host) : '')}</td><td class="muted">${esc(l.client)} ${esc(l.ip || '')}</td></tr>`).join('')}</table></section>
     </div>`, '#/');
   $$('[data-cell]', main).forEach(a => a.onclick = e => { e.preventDefault(); const l = d.lessons.find(x => x.id === +a.dataset.cell); cellDialog({ id: d.student.id, name: d.student.name }, l, l.status, d.grades.filter(g => g.lesson_id === l.id), render, d.cls?.id); });
+}
+
+// =====================================================================
+// Папка учня: документи з його комп'ютера (кіоск синхронізує щохвилини)
+// =====================================================================
+const PREVIEW = /\.(docx|pdf|png|jpe?g|gif|webp|bmp|svg|txt|csv|md|py|js|html?|css|json|xml|pas|cpp|c|h|java|cs|php|sql)$/i;
+const fileIcon = n => /\.docx?$/i.test(n) ? '📝' : /\.(xlsx?|csv|ods)$/i.test(n) ? '📊' : /\.(pptx?|odp)$/i.test(n) ? '📽' : /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(n) ? '🖼' : /\.pdf$/i.test(n) ? '📕' : /\.(sb3|py|js|html?|pas|cpp|java)$/i.test(n) ? '💻' : '📄';
+async function folderPage(id, lessonId) {
+  const d = await api(`/students/${id}/folder`);
+  let lessons = d.lessons;
+  if (lessonId) lessons = [...lessons.filter(l => l.lesson_id === +lessonId), ...lessons.filter(l => l.lesson_id !== +lessonId)];
+  const main = shellFn(`
+    <div class="crumbs"><a href="#/journal/${d.cls?.id}">Журнал ${esc(d.cls?.name || '')}</a> › <a href="#/student/${d.student.id}">${esc(d.student.name)}</a></div>
+    <div class="page-head"><h1>📂 Папка учня: ${esc(d.student.name)}</h1>
+      ${lessons.length ? `<a class="btn" href="/api/students/${d.student.id}/folder.zip">⬇ Уся папка (ZIP)</a>` : ''}</div>
+    <p class="folder-path">📁 Документи › InfoKlas › ${esc(d.student.name)}</p>
+    <p class="hint">Копія папки з комп'ютера учня: кіоск надсилає нові та змінені файли щохвилини під час уроку і коли учень натискає «Я закінчив».
+      ${d.last_sync ? `Останнє оновлення: <b>${fmtDate(d.last_sync, true)}</b>.` : ''} Учні вдома надсилають файли через сайт.</p>
+    ${lessons.length ? lessons.map(L => `
+      <section class="card folder-lesson ${L.lesson_id === +lessonId ? 'hl' : ''}">
+        <div class="page-head"><h3>📁 ${esc(L.title)}</h3><a class="btn sm ghost" href="/api/students/${d.student.id}/folder.zip?lesson_id=${L.lesson_id}">⬇ ZIP</a></div>
+        <table class="tbl compact"><tbody>${L.files.map(f => `<tr class="${f.old ? 'dim-row' : ''}">
+          <td>${fileIcon(f.name)} <b>${esc(f.name)}</b>${f.old ? ' <small class="muted">(попередня версія)</small>' : ''}${f.author !== d.student.name ? ` <small class="muted">· від ${esc(f.author)} (група)</small>` : ''}</td>
+          <td class="muted">${fmtSize(f.size)}</td><td class="muted">${fmtDate(f.created_at, true)}</td>
+          <td>${f.submission_id ? '<span class="ok-text">✅ здано</span>' : '<span class="muted">✏️ чернетка</span>'}</td>
+          <td class="row-actions">${PREVIEW.test(f.name) ? `<button class="btn sm" data-prev="${f.id}" data-name="${esc(f.name)}">👁 Переглянути</button>` : ''}
+            <a class="btn sm ghost" href="/api/files/${f.id}">⬇</a></td></tr>`).join('')}</tbody></table>
+      </section>`).join('') : '<div class="card"><p class="muted">Поки що порожньо. Файли з\'являться, коли учень збереже роботу в папку InfoKlas на комп\'ютері в класі (або надішле її з дому).</p></div>'}`, '#/journal');
+  $$('[data-prev]', main).forEach(b => b.onclick = () => {
+    modal(`<h3>${fileIcon(b.dataset.name)} ${esc(b.dataset.name)}</h3>
+      <iframe class="preview-frame" src="/api/files/${b.dataset.prev}/preview" sandbox="allow-same-origin"></iframe>
+      <p><a class="btn" href="/api/files/${b.dataset.prev}">⬇ Завантажити й відкрити в програмі</a></p>`, { wide: true });
+  });
+  if (lessonId) main.querySelector('.folder-lesson.hl')?.scrollIntoView({ block: 'start' });
 }
 
 // =====================================================================
@@ -479,7 +515,7 @@ async function livePage(id) {
     const m = modal(`<h3>${esc(st.name)}</h3>
       <p>${st.seat ? `ПК ${st.seat.computer_no} · ${st.seat.role === 'driver' ? '⌨️ за клавіатурою' : '🧭 штурман'}` : 'не розсаджений'} ${st.online ? '· 🟢 онлайн' : ''}</p>
       <div class="row wrap">${st.seat ? `<button class="btn" id="drv">⌨️ Зробити водієм</button><button class="btn ghost" id="uns">Зняти з ПК</button>` : ''}
-        <a class="btn ghost" href="#/student/${st.id}">Профіль</a></div>
+        <a class="btn ghost" href="#/student/${st.id}">Профіль</a><a class="btn ghost" href="#/folder/${st.id}/${L.lesson?.id || ''}">📂 Папка учня</a></div>
       <h4>Кроки</h4><ol class="steps-mini">${(L.lesson?.steps || []).map(s => `<li class="${done.has(s.id) ? 'ok' : ''}">${done.get(s.id) === 'self' ? '✋' : done.get(s.id) === 'group' ? '👥' : '·'} ${esc(s.text.slice(0, 70))}</li>`).join('')}</ol>
       <h4>Вміння за цей урок</h4>
       <div class="row"><button class="btn" data-m="1">⭐ Вміє</button><button class="btn" data-m="0">⚠️ Не вміє</button><button class="btn ghost" data-m="">скинути</button></div>
@@ -628,7 +664,7 @@ async function journalPage(classId) {
         <small>${(sessByLesson[l.id] || []).map(s => s.status === 'cancelled' ? `<span title="${esc(s.cancel_reason || '')}">🚨${fmtDate(s.date).slice(0, 5)}</span>` : fmtDate(s.date).slice(0, 5)).join(' ')}</small></th>`).join('')}</tr></thead>
       <tbody>${J.students.map(st => {
         const gr = Object.values(J.grades[st.id] || {}).flat().map(g => parseFloat(g.value)).filter(x => !isNaN(x));
-        return `<tr><td class="sticky"><a href="#/student/${st.id}">${esc(st.name)}</a></td>
+        return `<tr><td class="sticky"><a href="#/student/${st.id}">${esc(st.name)}</a> <a class="folder-link" href="#/folder/${st.id}" title="Папка учня — документи з його комп'ютера">📂</a></td>
         ${J.lessons.map(l => { const c = J.cells[st.id][l.id]; const S = STATES[c.state]; const g = (J.grades[st.id]?.[l.id] || []);
           return `<td class="cell ${S.cls}" data-s="${st.id}" data-l="${l.id}" title="${esc(S.label)}${c.total ? ` · сам ${c.self}, у групі ${c.group} з ${c.total}` : ''}">${S.icon}${c.home ? '<sup>🏠</sup>' : ''}${c.files?.length ? '<sup title="Є файли">📎</sup>' : ''}${g.length ? `<b class="g">${g.map(x => esc(x.value)).join(',')}</b>` : ''}</td>`; }).join('')}
         <td class="muted">${st.driver}/${st.seated}</td><td><b>${gr.length ? (gr.reduce((a, b) => a + b, 0) / gr.length).toFixed(1) : ''}</b></td></tr>`; }).join('')}</tbody>
@@ -655,6 +691,7 @@ function cellDialog(st, l, c, grades, after, classId) {
     ${c.total ? `<p>Кроки: ✋ сам <b>${c.self}</b>, 👥 у групі <b>${c.group}</b> з ${c.total}${c.home ? ` · 🏠 вдома: ${c.home}` : ''}</p>` : ''}
     ${c.finished_at ? `<p>Здано: ${fmtDate(c.finished_at, true)}</p>` : ''}
     ${c.files?.length ? `<p><b>Файли роботи:</b></p>${filesHtml(c.files)}` : ''}
+    <p><a class="btn sm" href="#/folder/${st.id}/${l.id}">📂 Відкрити папку учня (цей урок)</a></p>
     ${c.screenshot ? `<img src="${esc(c.screenshot)}" class="shot-prev">` : ''}
     ${classId ? `<p><a href="/api/lessons/${l.id}/results.zip?class_id=${classId}">⬇ Роботи всього класу з цього уроку (ZIP)</a></p>` : ''}
     ${sa.length ? `<p><b>Самооцінка:</b></p><ul>${sa.map(([k, v]) => `<li>${['🔴', '🟡', '🟢'][v]} ${esc(k)}</li>`).join('')}</ul>` : ''}
@@ -734,7 +771,7 @@ async function devicesPage() {
       <div class="row"><button class="btn" id="lockall">🔒 Заблокувати всі</button><button class="btn" id="unlockall">🔓 Розблокувати всі</button><button class="btn" id="exitall">⏏ Закрити кіоск на всіх</button></div></div>
     <section class="card"><h3>▶ Запуск кіоску через Veyon</h3>
       <p class="muted">Veyon → виділіть комп'ютери → <b>«Запустити програму»</b> і вставте команду (збережіть її у Veyon, щоб наступного разу обрати зі списку):</p>
-      <p>Windows: <code>"C:\Program Files\InfoKlas Kiosk\InfoKlas Kiosk.exe" --open</code></p>
+      <p>Windows: <code>"C:\\Program Files\\InfoKlas Kiosk\\InfoKlas Kiosk.exe" --open</code></p>
       <p>Linux Mint: <code>infoklas-kiosk --open</code></p>
       <p class="hint"><code>--open</code> — учні одразу бачать вхід. Без нього кіоск стартує заблокованим, і ви розблоковуєте ПК звідси чи з уроку. Після «Завершити урок» кіоски закриваються самі (вимикається в ⚙️).</p></section>
     <section class="card">

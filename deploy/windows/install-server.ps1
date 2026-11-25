@@ -58,11 +58,16 @@ nssm set InfoKlas Start SERVICE_AUTO_START | Out-Null
 nssm set InfoKlas AppExit Default Restart | Out-Null
 nssm start InfoKlas | Out-Null
 
-Write-Host "== 4. Брандмауер (лише локальна мережа)" -ForegroundColor Cyan
+Write-Host "== 4. Брандмауер (лише приватні адреси шкільної мережі)" -ForegroundColor Cyan
 Get-NetFirewallRule -DisplayName "InfoKlas" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-New-NetFirewallRule -DisplayName "InfoKlas" -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow -Profile Private,Domain -RemoteAddress LocalSubnet | Out-Null
+# Profile Any: шкільна мережа часто має тип «Загальнодоступна» — тоді правило лише для Private/Domain не діє.
+# RemoteAddress — усі приватні діапазони (класи, Wi-Fi для телефонів можуть бути в різних підмережах); з інтернету порт закритий.
+New-NetFirewallRule -DisplayName "InfoKlas" -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow -Profile Any -RemoteAddress 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16 | Out-Null
 
 Start-Sleep 3
+# Перевірка: чи відповідає сервер на цьому ПК
+try { $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 "http://localhost:$Port/"; Write-Host "   Сервер відповідає на http://localhost:$Port" -ForegroundColor Green }
+catch { Write-Host "   УВАГА: сервер не відповідає. Журнал: $InstallDir\logs\server.log" -ForegroundColor Red }
 $ips = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } | Select-Object -ExpandProperty IPAddress
 Write-Host ""
 Write-Host "Готово! Сервер працює як служба Windows і запускається сам." -ForegroundColor Green

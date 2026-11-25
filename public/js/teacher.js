@@ -828,10 +828,30 @@ async function homeworkPage() {
 // Комп'ютери (кіоск) та налаштування
 // =====================================================================
 async function devicesPage() {
-  const [devs, codes, logins] = await Promise.all([api('/devices'), api('/unlock-codes'), api('/logins')]);
+  const [devs, codes, logins, KI] = await Promise.all([api('/devices'), api('/unlock-codes'), api('/logins'), api('/kiosk-installer')]);
+  const isLocal = /^(localhost|127\.)/.test(location.hostname);
+  const origins = [...new Set([...(isLocal ? [] : [location.origin]), ...KI.addresses, ...(isLocal ? [location.origin] : [])])];
   const main = shellFn(`
     <div class="page-head"><h1>🔒 Комп'ютери класу (Lockdown)</h1>
       <div class="row"><button class="btn" id="lockall">🔒 Заблокувати всі</button><button class="btn" id="unlockall">🔓 Розблокувати всі</button><button class="btn" id="exitall">⏏ Закрити кіоск на всіх</button></div></div>
+    <section class="card enroll" id="enroll"><h3>⚡ Автоматичне встановлення кіоску на ПК учнів</h3>
+      <p class="muted">Один файл <code>install-kiosk.bat</code> на флешці встановлює й реєструє кіоск на будь-якому ПК з Windows 10/11 за 2–3 хвилини — без GitHub і без вікна налаштування.</p>
+      <ol class="enroll-steps">
+        <li><b>Інсталятор кіоску на сервері:</b>
+          ${KI.installer ? `<span class="ok-text">✓ ${esc(KI.installer.name)}</span> <small class="muted">${fmtSize(KI.installer.size)} · ${fmtDate(KI.installer.uploaded_at, true)}</small>` : '<span class="warn-text">ще не завантажено</span>'}
+          <label class="btn sm">⬆ ${KI.installer ? 'Замінити' : 'Завантажити'} <code>InfoKlas Kiosk Setup …exe</code><input type="file" accept=".exe" hidden id="kinst"></label>
+          <div class="hint">Файл з GitHub → Actions → «Збірка кіоску» → Artifacts → <i>infoklas-kiosk-windows</i> (розпакуйте ZIP).</div></li>
+        <li><b>Адреса сервера для учнівських ПК:</b>
+          <input id="korigin" list="korigins" value="${esc(origins[0] || location.origin)}"><datalist id="korigins">${origins.map(o => `<option value="${esc(o)}">`).join('')}</datalist>
+          ${isLocal ? '<div class="hint">Ви відкрили систему як localhost — учнівським ПК потрібна мережева адреса сервера (запропоновано автоматично).</div>' : ''}</li>
+        <li><b>Пароль облікового запису <code>uchen</code></b> — однаковий для всіх ПК (знатимете лише ви):
+          <input id="kpw" type="text" autocomplete="off" placeholder="порожньо — скрипт спитає на кожному ПК">
+          <label class="switch"><input type="checkbox" id="kauto"> після ввімкнення ПК одразу входить в <code>uchen</code> (автовхід)</label></li>
+        <li><button class="btn primary" id="kgen" ${KI.installer && KI.setup_script ? '' : 'disabled'}>🔑 Створити файл встановлення (діє 8 год)</button>
+          ${KI.setup_script ? '' : '<div class="warn-text">На сервері немає kiosk/windows/setup-student.ps1 — оновіть сервер.</div>'}</li>
+      </ol>
+      <div id="kout"></div>
+    </section>
     <section class="card"><h3>▶ Запуск кіоску</h3>
       <p><b>Автоматично:</b> в обліковому записі учня <code>uchen</code> кіоск стартує сам (заблокованим), розблоковується, коли ви натискаєте «▶ Почати урок», і знову блокується після «🏁 Завершити урок».</p>
       <p class="muted"><b>Вручну (запасний варіант):</b> Veyon → виділіть комп'ютери → <b>«Запустити програму»</b> і вставте команду:</p>
@@ -855,6 +875,52 @@ async function devicesPage() {
     <section class="card"><h3>Журнал входів учнів</h3>
       <table class="tbl compact"><thead><tr><th>Час</th><th>Учень</th><th>Клас</th><th>Звідки</th><th>Клієнт</th></tr></thead><tbody>
       ${logins.slice(0, 100).map(l => `<tr><td>${fmtDate(l.at, true)}</td><td><a href="#/student/${l.user_id}">${esc(l.name)}</a></td><td>${esc(l.class_name || '')}</td><td>${l.place === 'home' ? '🏠 поза класом' : '🏫 ПК ' + l.computer_no + (l.host ? ' · ' + esc(l.host) : '')}</td><td class="muted">${esc(l.client)} ${esc(l.ip || '')}</td></tr>`).join('')}</tbody></table></section>`, '#/devices');
+  // ---- автоматичне встановлення ----
+  $('#kinst').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    toast(`Завантаження ${f.name} (${fmtSize(f.size)})…`, 'info', 8000);
+    const fd = new FormData(); fd.append('file', f);
+    await api('/kiosk-installer', { body: fd }); toast('Інсталятор збережено на сервері'); render();
+  };
+  $('#kgen').onclick = async () => {
+    const origin = $('#korigin').value.trim().replace(/\/+$/, '');
+    const pw = $('#kpw').value;
+    if (!/^https?:\/\/[^/]+$/.test(origin)) return toast('Вкажіть адресу сервера, напр. http://192.168.1.10:3000', 'err');
+    if (/["\r\n]/.test(pw)) return toast('Пароль не може містити лапки "', 'err');
+    const auto = $('#kauto').checked;
+    const t = await api('/enroll-tokens', { body: { hours: 8 } });
+    const psq = s => s.replace(/'/g, "''");
+    const args = [pw ? `-StudentPassword '${psq(pw)}'` : '', auto ? '-AutoLogin' : ''].filter(Boolean).join(' ');
+    const ps = `$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol='Tls12'; $f=Join-Path $env:TEMP 'infoklas-install.ps1'; Invoke-WebRequest -UseBasicParsing '${origin}/kiosk/install.ps1?t=${t.token}' -OutFile $f; & $f ${args}`.trim();
+    const bat = ['@echo off',
+      'rem InfoKlas - install kiosk on a student PC (Windows 10/11).',
+      'rem Right-click this file -> "Run as administrator".',
+      'net session >nul 2>&1',
+      'if errorlevel 1 (',
+      '  powershell -NoProfile -Command "Start-Process -FilePath \'%~f0\' -Verb RunAs"',
+      '  exit /b',
+      ')',
+      'chcp 65001 >nul',
+      `powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps.replace(/%/g, '%%')}"`,
+      'echo.', 'pause', ''].join('\r\n');
+    const save = () => {
+      if (window.InfoKlasApp?.saveFile) return InfoKlasApp.saveFile('install-kiosk.bat', 'application/octet-stream', btoa(unescape(encodeURIComponent(bat))));
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bat], { type: 'application/octet-stream' })); a.download = 'install-kiosk.bat'; a.click();
+    };
+    save();
+    $('#kout').innerHTML = `<div class="enroll-out">
+      <p class="ok-text">✓ Файл <b>install-kiosk.bat</b> завантажено. Ключ діє до ${fmtDate(t.expires_at, true)}.</p>
+      <button class="btn" id="kagain">⬇ Завантажити ще раз</button>
+      <h4>На кожному учнівському ПК</h4>
+      <ol><li>Скопіюйте <b>install-kiosk.bat</b> з флешки (або відкрийте прямо з неї).</li>
+        <li>Правою кнопкою → <b>«Запуск від імені адміністратора»</b> (якщо Windows попередить — «Докладніше» → «Усе одно запустити»).</li>
+        <li>Підтвердіть <b>номер ПК</b> (Enter — номер з імені комп'ютера) і зачекайте 2–3 хв до напису «ГОТОВО».</li>
+        <li>Перезавантажте ПК — він з'явиться в таблиці нижче.</li></ol>
+      <details><summary>Або команда для PowerShell (від імені адміністратора)</summary>
+        <pre class="cmd">Set-ExecutionPolicy -Scope Process Bypass -Force; ${esc(ps)}</pre></details>
+      ${pw ? '<p class="hint">⚠️ У файлі записано пароль облікового запису uchen — після встановлення видаліть файл з флешки.</p>' : ''}</div>`;
+    $('#kagain').onclick = save;
+  };
   const gen = async kind => {
     const r = await api('/unlock-codes', { body: { kind } });
     $('#code').innerHTML = `<div class="pw-big">${r.code}</div><p class="muted">${kind === 'exit' ? 'Закриває кіоск (обслуговування ПК).' : 'Розблоковує один ПК.'} Одноразовий, діє до ${fmtDate(r.expires_at, true)}.</p>`;

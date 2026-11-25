@@ -1064,9 +1064,15 @@ app.post('/api/devices/:id/offline-code', auth, teacher, h(req => {
 
 // --- API самого кіоску ---
 app.post('/api/device/register', h(req => {
-  const { login, password, computer_no, name } = req.body;
-  const t = get("SELECT * FROM users WHERE login=? AND role='teacher'", login);
-  if (!t || !U.verifyPw(password, t.pw_hash)) bad('Потрібен логін і пароль вчителя');
+  const { login, password, computer_no, name, enroll_token } = req.body;
+  if (enroll_token) {
+    if (!validEnrollToken(enroll_token)) bad('Ключ встановлення невірний або закінчився — створіть новий на сторінці «Комп\'ютери»');
+    run('UPDATE enroll_tokens SET uses=uses+1 WHERE token=?', enroll_token);
+  } else {
+    const t = get("SELECT * FROM users WHERE login=? AND role='teacher'", login);
+    if (!t || !U.verifyPw(password, t.pw_hash)) bad('Потрібен логін і пароль вчителя');
+  }
+  if (!(+computer_no >= 1 && +computer_no <= 99)) bad('Невірний номер ПК');
   const key = crypto.randomBytes(24).toString('hex');
   const secret = crypto.randomBytes(20).toString('hex');
   run('DELETE FROM devices WHERE computer_no=?', +computer_no);
@@ -1074,6 +1080,58 @@ app.post('/api/device/register', h(req => {
   return { key, hotp_secret: secret, computer_no: +computer_no };
 }));
 const deviceByKey = key => (key ? get('SELECT * FROM devices WHERE key=?', key) : null);
+
+// ======================================================================
+// Автоматичне встановлення кіоску: інсталятор на сервері + ключ встановлення
+// ======================================================================
+const KIOSK_DIR = path.join(DATA_DIR, 'kiosk');
+const validEnrollToken = t => !!(t && get("SELECT 1 FROM enroll_tokens WHERE token=? AND revoked=0 AND expires_at>?", String(t), new Date().toISOString()));
+const kioskInstaller = () => { const k = setting('kiosk_installer'); return k && fs.existsSync(path.join(KIOSK_DIR, k.file)) ? k : null; };
+const SETUP_STUDENT = [path.join(__dirname, '..', 'kiosk', 'windows', 'setup-student.ps1')].find(p => fs.existsSync(p));
+
+app.get('/api/kiosk-installer', auth, teacher, h(() => ({
+  installer: kioskInstaller(), setup_script: !!SETUP_STUDENT,
+  tokens: all("SELECT token, created_at, expires_at, uses, revoked FROM enroll_tokens ORDER BY created_at DESC LIMIT 10"),
+  addresses: Object.values(require('os').networkInterfaces()).flat().filter(a => a && a.family === 'IPv4' && !a.internal).map(a => `http://${a.address}:${PORT}`),
+})));
+app.post('/api/kiosk-installer', auth, teacher, upload.single('file'), h(req => {
+  const f = req.file; if (!f) bad('Оберіть файл інсталятора');
+  const name = origName(f);
+  if (!/\.exe$/i.test(name)) { fs.unlinkSync(f.path); bad('Потрібен файл .exe — «InfoKlas Kiosk Setup …exe»'); }
+  const old = setting('kiosk_installer'); if (old) { try { fs.unlinkSync(path.join(KIOSK_DIR, old.file)); } catch {} }
+  const file = 'kiosk-setup.exe';
+  fs.renameSync(f.path, path.join(KIOSK_DIR, file));
+  const info = { file, name, size: f.size, uploaded_at: new Date().toISOString() };
+  setSetting('kiosk_installer', info);
+  return info;
+}));
+app.post('/api/enroll-tokens', auth, teacher, h(req => {
+  const hours = Math.max(1, Math.min(72, parseInt(req.body.hours, 10) || 8));
+  const token = crypto.randomBytes(18).toString('base64url');
+  const expires_at = new Date(Date.now() + hours * 3600000).toISOString();
+  run('INSERT INTO enroll_tokens(token,expires_at) VALUES(?,?)', token, expires_at);
+  return { token, expires_at };
+}));
+app.delete('/api/enroll-tokens/:token', auth, teacher, h(req => { run('UPDATE enroll_tokens SET revoked=1 WHERE token=?', req.params.token); return { ok: true }; }));
+
+// Публічні адреси для учнівських ПК — лише з дійсним ключем встановлення
+function serverOrigin(req) { return `${req.protocol}://${req.get('host')}`; }
+app.get('/kiosk/install.ps1', (req, res) => {
+  if (!validEnrollToken(req.query.t)) return res.status(403).type('text').send('Ключ встановлення невірний або закінчився');
+  const tpl = fs.readFileSync(path.join(__dirname, 'kiosk-install.ps1'), 'utf8')
+    .replace('__SERVER__', serverOrigin(req)).replace('__TOKEN__', String(req.query.t).replace(/[^\w-]/g, ''));
+  res.type('text/plain; charset=utf-8').send('﻿' + tpl.replace(/\r?\n/g, '\r\n')); // BOM — щоб Windows PowerShell 5.1 правильно читав кирилицю
+});
+app.get('/kiosk/setup.exe', (req, res) => {
+  if (!validEnrollToken(req.query.t)) return res.status(403).type('text').send('Ключ встановлення невірний або закінчився');
+  const k = kioskInstaller(); if (!k) return res.status(404).type('text').send('Інсталятор кіоску ще не завантажено на сервер');
+  res.download(path.join(KIOSK_DIR, k.file), k.name);
+});
+app.get('/kiosk/setup-student.ps1', (req, res) => {
+  if (!validEnrollToken(req.query.t)) return res.status(403).type('text').send('Ключ встановлення невірний або закінчився');
+  if (!SETUP_STUDENT) return res.status(404).type('text').send('Немає kiosk/windows/setup-student.ps1 на сервері');
+  res.type('text/plain; charset=utf-8').sendFile(SETUP_STUDENT);
+});
 app.post('/api/device/unlock', h(req => {
   const d = deviceByKey(req.body.key); if (!d) bad('Пристрій не зареєстровано');
   const code = String(req.body.code || '').trim();

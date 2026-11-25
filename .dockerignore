@@ -1,4 +1,7 @@
 node_modules
 data
-kiosk
+kiosk/node_modules
+kiosk/dist
+android
+dist-app
 .git

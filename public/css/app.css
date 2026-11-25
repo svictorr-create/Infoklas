@@ -346,3 +346,9 @@ label.inline { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
   #toasts { left: 10px; right: 10px; bottom: 10px; max-width: none; }
   label.switch { display: block; } label.switch input { margin-right: 6px; vertical-align: middle; }
 }
+
+/* автоматичне встановлення кіоску */
+.enroll { border-left: 4px solid var(--pri); }
+.enroll-steps { padding-left: 20px; } .enroll-steps > li { margin: 10px 0; } .enroll-steps input:not([type=checkbox]):not([type=file]) { max-width: 420px; display: block; margin: 6px 0; }
+.enroll-out { background: #f6f8fd; border-radius: 10px; padding: 12px 16px; margin-top: 8px; }
+pre.cmd { background: #1d2433; color: #e9ecf3; padding: 10px 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; font-size: .82em; }

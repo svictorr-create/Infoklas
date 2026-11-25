@@ -180,6 +180,9 @@ CREATE TABLE IF NOT EXISTS session_links (
   url TEXT NOT NULL, title TEXT, lock INTEGER DEFAULT 0, pcs TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, closed_at TEXT);
 `);
 fs.mkdirSync(path.join(DATA_DIR, 'uploads', 'work'), { recursive: true });
+db.exec(`CREATE TABLE IF NOT EXISTS enroll_tokens (
+  token TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP, expires_at TEXT NOT NULL, uses INTEGER DEFAULT 0, revoked INTEGER DEFAULT 0)`);
+fs.mkdirSync(path.join(DATA_DIR, 'kiosk'), { recursive: true });
 // Міграція: ім'я комп'ютера (Windows/Linux) у журналі входів
 if (!all('PRAGMA table_info(login_log)').some(c => c.name === 'host')) db.exec('ALTER TABLE login_log ADD COLUMN host TEXT');
 // Міграція: кількість комп'ютерів зберігається окремо для кожного уроку

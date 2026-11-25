@@ -4,6 +4,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY server ./server
 COPY public ./public
+COPY kiosk/windows ./kiosk/windows
 ENV PORT=3000 DATA_DIR=/data
 VOLUME /data
 EXPOSE 3000

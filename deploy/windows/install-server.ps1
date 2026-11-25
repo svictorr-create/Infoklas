@@ -40,6 +40,8 @@ if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
 Write-Host "== 2. Копіювання в $InstallDir" -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $InstallDir, "$InstallDir\data", "$InstallDir\logs" | Out-Null
 foreach ($item in "server", "public", "package.json", "package-lock.json") { Copy-Item -Recurse -Force (Join-Path $Src $item) $InstallDir }
+New-Item -ItemType Directory -Force -Path "$InstallDir\kiosk" | Out-Null
+Copy-Item -Recurse -Force (Join-Path $Src "kiosk\windows") "$InstallDir\kiosk"   # скрипт підготовки учнівських ПК (роздає сервер)
 Push-Location $InstallDir
 npm ci --omit=dev
 Pop-Location

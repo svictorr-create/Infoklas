@@ -23,7 +23,9 @@ param(
   [string]$Installer = "",
   [string]$Student = "uchen",
   [switch]$AutoLogin,
-  [switch]$NoAutoStart
+  [switch]$NoAutoStart,
+  [string]$StudentPassword = "",   # для автоматичного встановлення (щоб не вводити пароль на кожному ПК)
+  [switch]$Quiet                    # не показувати підсумкові підказки (їх показує скрипт автоматичного встановлення)
 )
 $ErrorActionPreference = "Stop"
 
@@ -43,7 +45,8 @@ if (-not (Test-Path $KioskExe)) { Write-Host "   Увага: не знайден
 
 # ---------- 2. Обліковий запис учня ----------
 Write-Host "== 2. Обліковий запис учня: $Student" -ForegroundColor Cyan
-$pw = Read-Host "Пароль для '$Student' (знатиме лише вчитель)" -AsSecureString
+if ($StudentPassword) { $pw = ConvertTo-SecureString $StudentPassword -AsPlainText -Force }
+else { $pw = Read-Host "Пароль для '$Student' (знатиме лише вчитель)" -AsSecureString }
 if (-not (Get-LocalUser -Name $Student -ErrorAction SilentlyContinue)) {
   New-LocalUser -Name $Student -Password $pw -FullName "Учень" -PasswordNeverExpires -UserMayNotChangePassword | Out-Null
 } else {
@@ -111,6 +114,7 @@ if ($AutoLogin) {
   Write-Host "   Автовхід у '$Student' увімкнено."
 }
 
+if ($Quiet) { return }
 Write-Host ""
 Write-Host "Готово. Перезавантажте ПК." -ForegroundColor Green
 Write-Host "Перший запуск кіоску (з Veyon) попросить адресу сервера, номер ПК і логін вчителя — це один раз."

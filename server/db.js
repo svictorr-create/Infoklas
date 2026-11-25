@@ -183,6 +183,9 @@ fs.mkdirSync(path.join(DATA_DIR, 'uploads', 'work'), { recursive: true });
 db.exec(`CREATE TABLE IF NOT EXISTS enroll_tokens (
   token TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP, expires_at TEXT NOT NULL, uses INTEGER DEFAULT 0, revoked INTEGER DEFAULT 0)`);
 fs.mkdirSync(path.join(DATA_DIR, 'kiosk'), { recursive: true });
+for (const [col, type] of [['code', 'TEXT'], ['autologin', 'INTEGER DEFAULT 0']]) {
+  if (!all('PRAGMA table_info(enroll_tokens)').some(c => c.name === col)) db.exec(`ALTER TABLE enroll_tokens ADD COLUMN ${col} ${type}`);
+}
 // Міграція: ім'я комп'ютера (Windows/Linux) у журналі входів
 if (!all('PRAGMA table_info(login_log)').some(c => c.name === 'host')) db.exec('ALTER TABLE login_log ADD COLUMN host TEXT');
 // Міграція: кількість комп'ютерів зберігається окремо для кожного уроку

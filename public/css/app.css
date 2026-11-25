@@ -352,3 +352,5 @@ label.inline { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
 .enroll-steps { padding-left: 20px; } .enroll-steps > li { margin: 10px 0; } .enroll-steps input:not([type=checkbox]):not([type=file]) { max-width: 420px; display: block; margin: 6px 0; }
 .enroll-out { background: #f6f8fd; border-radius: 10px; padding: 12px 16px; margin-top: 8px; }
 pre.cmd { background: #1d2433; color: #e9ecf3; padding: 10px 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; font-size: .82em; }
+.short-link { background: #fff; border: 2px dashed var(--pri); border-radius: 10px; padding: 10px 14px; margin: 10px 0; }
+.big-link { display: inline-block; font-size: 1.35em; font-weight: 700; padding: 6px 12px; margin: 6px 0; background: var(--pri-2); color: var(--pri); user-select: all; }

@@ -888,7 +888,7 @@ async function devicesPage() {
     if (!/^https?:\/\/[^/]+$/.test(origin)) return toast('Вкажіть адресу сервера, напр. http://192.168.1.10:3000', 'err');
     if (/["\r\n]/.test(pw)) return toast('Пароль не може містити лапки "', 'err');
     const auto = $('#kauto').checked;
-    const t = await api('/enroll-tokens', { body: { hours: 8 } });
+    const t = await api('/enroll-tokens', { body: { hours: 8, autologin: auto } });
     const psq = s => s.replace(/'/g, "''");
     const args = [pw ? `-StudentPassword '${psq(pw)}'` : '', auto ? '-AutoLogin' : ''].filter(Boolean).join(' ');
     const ps = `$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol='Tls12'; $f=Join-Path $env:TEMP 'infoklas-install.ps1'; Invoke-WebRequest -UseBasicParsing '${origin}/kiosk/install.ps1?t=${t.token}' -OutFile $f; & $f ${args}`.trim();
@@ -910,9 +910,12 @@ async function devicesPage() {
     save();
     $('#kout').innerHTML = `<div class="enroll-out">
       <p class="ok-text">✓ Файл <b>install-kiosk.bat</b> завантажено. Ключ діє до ${fmtDate(t.expires_at, true)}.</p>
+      <div class="short-link"><div>🔗 <b>Без флешки:</b> на учнівському ПК відкрийте в браузері</div>
+        <code class="big-link">${esc(origin)}/k/${t.code}</code>
+        <div class="hint">— скачається той самий install-kiosk.bat (пароль <code>uchen</code> скрипт спитає на ПК). Браузер може попередити про тип файлу — «Зберегти»/«Залишити».</div></div>
       <button class="btn" id="kagain">⬇ Завантажити ще раз</button>
       <h4>На кожному учнівському ПК</h4>
-      <ol><li>Скопіюйте <b>install-kiosk.bat</b> з флешки (або відкрийте прямо з неї).</li>
+      <ol><li>Завантажте <b>install-kiosk.bat</b> за посиланням вище (або скопіюйте з флешки).</li>
         <li>Правою кнопкою → <b>«Запуск від імені адміністратора»</b> (якщо Windows попередить — «Докладніше» → «Усе одно запустити»).</li>
         <li>Підтвердіть <b>номер ПК</b> (Enter — номер з імені комп'ютера) і зачекайте 2–3 хв до напису «ГОТОВО».</li>
         <li>Перезавантажте ПК — він з'явиться в таблиці нижче.</li></ol>

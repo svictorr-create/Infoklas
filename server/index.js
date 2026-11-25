@@ -1109,13 +1109,35 @@ app.post('/api/enroll-tokens', auth, teacher, h(req => {
   const hours = Math.max(1, Math.min(72, parseInt(req.body.hours, 10) || 8));
   const token = crypto.randomBytes(18).toString('base64url');
   const expires_at = new Date(Date.now() + hours * 3600000).toISOString();
-  run('INSERT INTO enroll_tokens(token,expires_at) VALUES(?,?)', token, expires_at);
-  return { token, expires_at };
+  // короткий код для посилання /k/КОД (без схожих символів 0/O, 1/I)
+  const ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code; do { code = Array.from({ length: 6 }, () => ABC[crypto.randomInt(ABC.length)]).join(''); } while (get('SELECT 1 FROM enroll_tokens WHERE code=?', code));
+  run('INSERT INTO enroll_tokens(token,expires_at,code,autologin) VALUES(?,?,?,?)', token, expires_at, code, req.body.autologin ? 1 : 0);
+  return { token, code, expires_at };
 }));
 app.delete('/api/enroll-tokens/:token', auth, teacher, h(req => { run('UPDATE enroll_tokens SET revoked=1 WHERE token=?', req.params.token); return { ok: true }; }));
 
 // Публічні адреси для учнівських ПК — лише з дійсним ключем встановлення
 function serverOrigin(req) { return `${req.protocol}://${req.get('host')}`; }
+// Коротке посилання для учнівського ПК: http://сервер/k/КОД -> install-kiosk.bat (без пароля: скрипт спитає його на ПК)
+function makeInstallBat(origin, token, args) {
+  const ps = `$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol='Tls12'; $f=Join-Path $env:TEMP 'infoklas-install.ps1'; Invoke-WebRequest -UseBasicParsing '${origin}/kiosk/install.ps1?t=${token}' -OutFile $f; & $f ${args}`.trim();
+  return ['@echo off',
+    'rem InfoKlas - install kiosk on a student PC (Windows 10/11).',
+    'rem Right-click this file -> "Run as administrator".',
+    'net session >nul 2>&1', 'if errorlevel 1 (',
+    '  powershell -NoProfile -Command "Start-Process -FilePath \'%~f0\' -Verb RunAs"', '  exit /b', ')',
+    'chcp 65001 >nul',
+    `powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps.replace(/%/g, '%%')}"`,
+    'echo.', 'pause', ''].join('\r\n');
+}
+app.get('/k/:code', (req, res) => {
+  const t = get("SELECT * FROM enroll_tokens WHERE code=? AND revoked=0 AND expires_at>?", String(req.params.code).toUpperCase(), new Date().toISOString());
+  if (!t) return res.status(404).type('text/plain; charset=utf-8').send('Посилання невірне або закінчилося. Створіть нове на сторінці «Комп\'ютери».');
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Content-Disposition', 'attachment; filename="install-kiosk.bat"');
+  res.send(makeInstallBat(serverOrigin(req), t.token, t.autologin ? '-AutoLogin' : ''));
+});
 app.get('/kiosk/install.ps1', (req, res) => {
   if (!validEnrollToken(req.query.t)) return res.status(403).type('text').send('Ключ встановлення невірний або закінчився');
   const tpl = fs.readFileSync(path.join(__dirname, 'kiosk-install.ps1'), 'utf8')

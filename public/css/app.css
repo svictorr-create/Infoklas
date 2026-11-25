@@ -354,3 +354,7 @@ label.inline { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
 pre.cmd { background: #1d2433; color: #e9ecf3; padding: 10px 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; font-size: .82em; }
 .short-link { background: #fff; border: 2px dashed var(--pri); border-radius: 10px; padding: 10px 14px; margin: 10px 0; }
 .big-link { display: inline-block; font-size: 1.35em; font-weight: 700; padding: 6px 12px; margin: 6px 0; background: var(--pri-2); color: var(--pri); user-select: all; }
+
+/* імпорт учнів, оцінки для НЗ */
+.import-prev { background: #f6f8fd; border-radius: 10px; padding: 10px 14px; margin-top: 10px; }
+.nz-table td:first-child { color: var(--muted); width: 40px; } .nz-table td:last-child { width: 90px; text-align: center; }

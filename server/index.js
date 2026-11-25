@@ -11,6 +11,7 @@ const { all, get, run, tx, setting, setSetting, DATA_DIR } = require('./db');
 const U = require('./util');
 const { autoSeat } = require('./seating');
 const { makeZip, safeName } = require('./zip');
+const Names = require('./names');
 
 U.setSecret(setting('secret'));
 const PORT = process.env.PORT || 3000;
@@ -222,8 +223,22 @@ app.get('/api/classes/:id/students', auth, teacher, h(req => {
   st.forEach(s => { s.last_login = last[s.id] || null; s.online = online.has(s.id); });
   return st;
 }));
+// Розпізнати список учнів: текст (скопійований з НЗ / Excel) або файл .xlsx/.xls/.csv
+app.post('/api/classes/:id/students/parse', auth, teacher, upload.single('file'), h(req => {
+  const keep = req.body.keep_patronymic === true || req.body.keep_patronymic === '1';
+  let r;
+  if (req.file) {
+    try { r = Names.parseFile(fs.readFileSync(req.file.path), origName(req.file), keep); }
+    catch (e) { bad('Не вдалося прочитати файл: ' + e.message); }
+    finally { try { fs.unlinkSync(req.file.path); } catch {} }
+  } else r = Names.parseText(req.body.text, keep);
+  const existing = studentsOf(req.params.id).map(s => s.name);
+  const { add, skipped } = Names.dedupe(r.names, existing);
+  return { names: add, skipped, column: r.column, sheet: r.sheet || null };
+}));
 app.post('/api/classes/:id/students', auth, teacher, h(req => {
-  const names = String(req.body.names || '').split('\n').map(s => s.trim().replace(/\s+/g, ' ')).filter(Boolean);
+  const raw = String(req.body.names || '').split('\n').map(s => s.trim().replace(/\s+/g, ' ')).filter(Boolean);
+  const names = Names.dedupe(raw, studentsOf(req.params.id).map(s => s.name)).add; // без повторів
   return tx(() => names.map(name => {
     const pw = U.genPassword();
     const base = U.translit(name.split(' ')[0]) || 'student';

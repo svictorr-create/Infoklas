@@ -145,10 +145,33 @@ async function classPage(id) {
   `, '#/');
   $('#print').onclick = () => window.print();
   $('#add').onclick = () => {
-    const m = modal(`<h3>Додати учнів у ${esc(cls.name)}</h3><p class="muted">Кожен учень з нового рядка: «Прізвище Ім'я». Логін і пароль згенеруються автоматично.</p>
-      <textarea id="names" rows="10" placeholder="Петренко Олена\nСидоренко Іван"></textarea><button class="btn primary" id="ok">Створити</button>`);
-    $('#ok', m.el).onclick = async () => {
-      const r = await api(`/classes/${id}/students`, { body: { names: $('#names', m.el).value } });
+    const m = modal(`<h3>Додати учнів у ${esc(cls.name)}</h3>
+      <p class="muted">Вставте список <b>скопійований зі сторінки класу в НЗ або з Excel</b> — номери, дати й інші стовпці приберуться самі. Або завантажте файл.</p>
+      <textarea id="names" rows="8" placeholder="1&#9;Петренко Олена Василівна\n2&#9;Сидоренко Іван\n…"></textarea>
+      <div class="row wrap"><label class="btn">📄 Файл з НЗ / Excel (.xlsx, .xls, .csv)<input type="file" id="nfile" accept=".xlsx,.xls,.csv,.txt" hidden></label>
+        <label class="switch"><input type="checkbox" id="npat"> залишати по батькові</label>
+        <button class="btn primary" id="nparse">🔍 Розпізнати</button></div>
+      <div id="npreview"></div>`);
+    const show = r => {
+      $('#npreview', m.el).innerHTML = `<div class="import-prev">
+        <p><b>Знайдено нових учнів: ${r.names.length}</b>${r.column ? ` <small class="muted">(стовпець ${esc(String(r.column))}${r.sheet ? ', аркуш «' + esc(r.sheet) + '»' : ''})</small>` : ''}</p>
+        ${r.skipped.length ? `<p class="muted small">Уже є в класі — пропущено: ${r.skipped.map(esc).join(', ')}</p>` : ''}
+        ${r.names.length ? `<p class="hint">Перевірте список — його можна виправити перед створенням:</p>
+          <textarea id="nfinal" rows="${Math.min(14, r.names.length + 1)}">${esc(r.names.join('\n'))}</textarea>
+          <button class="btn primary big" id="ok">✅ Створити облікові записи</button>`
+        : '<p class="warn-text">Не знайдено жодного «Прізвище Ім\'я». Перевірте, що скопіювали стовпець з іменами.</p>'}</div>`;
+      $('#ok', m.el)?.addEventListener('click', create);
+    };
+    const parse = async (file) => {
+      const fd = new FormData(); fd.append('keep_patronymic', $('#npat', m.el).checked ? '1' : '0');
+      if (file) fd.append('file', file); else fd.append('text', $('#names', m.el).value);
+      show(await api(`/classes/${id}/students/parse`, { body: fd }));
+    };
+    $('#nparse', m.el).onclick = () => parse();
+    $('#nfile', m.el).onchange = e => e.target.files[0] && parse(e.target.files[0]);
+    $('#names', m.el).addEventListener('paste', () => setTimeout(() => parse(), 50));
+    const create = async () => {
+      const r = await api(`/classes/${id}/students`, { body: { names: $('#nfinal', m.el).value } });
       m.close();
       modal(`<h3>Створено ${r.length} облікових записів</h3><table class="tbl">${r.map(x => `<tr><td>${esc(x.name)}</td><td><code>${esc(x.login)}</code></td><td><code>${esc(x.password)}</code></td></tr>`).join('')}</table>
         <p class="hint">Роздрукуйте картки кнопкою «🖨 Картки з паролями».</p>`, { onClose: render });
@@ -717,7 +740,7 @@ async function journalPage(classId) {
   const main = shellFn(`
     <div class="page-head"><h1>📊 Журнал</h1>
       <div class="row"><select id="cls">${classes.map(c => `<option value="${c.id}" ${c.id === +classId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
-      <button class="btn" id="csv">⬇ CSV</button></div></div>
+      <button class="btn" id="nzx">📤 Оцінки для НЗ</button><button class="btn" id="csv">⬇ CSV</button></div></div>
     <div class="legend">${Object.values(STATES).map(s => `<span><span class="st ${s.cls}">${s.icon}</span> ${s.label}</span>`).join('')}</div>
     <div class="journal-wrap"><table class="journal">
       <thead><tr><th rowspan="2" class="sticky">Учень</th>${units.map(u => `<th colspan="${u.n}" class="unit-th">${esc(u.name)}</th>`).join('')}<th rowspan="2" title="Скільки разів був за клавіатурою / скільки уроків розсаджений">⌨️</th><th rowspan="2">Сер.</th></tr>
@@ -736,13 +759,68 @@ async function journalPage(classId) {
     const st = J.students.find(s => s.id === +td.dataset.s), l = J.lessons.find(x => x.id === +td.dataset.l);
     cellDialog(st, l, J.cells[st.id][l.id], J.grades[st.id]?.[l.id] || [], render, J.cls.id);
   });
+  $('#nzx').onclick = () => nzExportDialog(J);
   $('#csv').onclick = () => {
     const rows = [['Учень', ...J.lessons.map(l => l.title), 'За клавіатурою']];
     J.students.forEach(st => rows.push([st.name, ...J.lessons.map(l => { const c = J.cells[st.id][l.id]; return STATES[c.state].label + ((J.grades[st.id]?.[l.id] || []).length ? ' / ' + J.grades[st.id][l.id].map(g => g.value).join(',') : ''); }), `${st.driver}/${st.seated}`]));
     const csv = '﻿' + rows.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(';')).join('\n');
-    const name = `журнал-${J.cls.name}.csv`;
+    const name = asciiName(`zhurnal-${J.cls.name}.csv`);
     if (window.InfoKlasApp?.saveFile) { InfoKlasApp.saveFile(name, 'text/csv', btoa(String.fromCharCode(...new TextEncoder().encode(csv)))); return; }
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = name; a.click();
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = name; document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  };
+}
+
+// ---------- Оцінки для НЗ: той самий порядок учнів, що в НЗ (за алфавітом), копіювання стовпця ----------
+// Назва файлу латиницею: браузери не завжди зберігають кириличні назви для завантажень з blob
+const TR = { а: 'a', б: 'b', в: 'v', г: 'h', ґ: 'g', д: 'd', е: 'e', є: 'ie', ж: 'zh', з: 'z', и: 'y', і: 'i', ї: 'i', й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch', ь: '', ю: 'iu', я: 'ia' };
+const asciiName = s => String(s).split('').map(c => { const l = c.toLowerCase(); return l in TR ? (c === l ? TR[l] : TR[l].replace(/^./, x => x.toUpperCase())) : c; }).join('').replace(/[^\w.-]+/g, '-');
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.append(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok;
+}
+function nzExportDialog(J) {
+  const students = [...J.students].sort((a, b) => a.name.localeCompare(b.name, 'uk', { sensitivity: 'base' }));
+  const lessonDate = lid => { const s = J.sessions.filter(x => x.lesson_id === lid && x.status !== 'cancelled').map(x => x.date).sort(); return s.length ? s[s.length - 1] : null; };
+  const kinds = [...new Set(Object.values(J.grades).flatMap(o => Object.values(o).flat()).map(g => g.kind))];
+  const lessons = J.lessons.filter(l => students.some(st => (J.grades[st.id]?.[l.id] || []).length));
+  if (!lessons.length) return toast('У журналі цього класу ще немає оцінок', 'info');
+  const m = modal(`<h3>📤 Оцінки для НЗ — ${esc(J.cls.name)}</h3>
+    <p class="muted">Учні — у тому ж порядку, що в журналі НЗ (за алфавітом). Скопіюйте стовпець і вставте в таблицю (Excel / Google Таблиці) або в розширення <a href="https://informatik.pp.ua/proekty/nz-uroki/" target="_blank" rel="noopener">НЗ-Уроки</a>, яке переносить оцінки з таблиці в НЗ.</p>
+    <div class="row wrap">
+      <label class="inline">Урок <select id="nzl">${lessons.map(l => `<option value="${l.id}">${lessonDate(l.id) ? fmtDate(lessonDate(l.id)).slice(0, 5) + ' · ' : ''}${esc(l.title)}</option>`).join('')}</select></label>
+      <label class="inline">Вид <select id="nzk"><option value="">усі</option>${kinds.map(k => `<option>${esc(k)}</option>`).join('')}</select></label>
+      <label class="inline">Якщо кілька <select id="nzm"><option value="last">остання</option><option value="avg">середня</option><option value="all">усі через кому</option></select></label>
+    </div>
+    <div id="nzt"></div>
+    <div class="row wrap"><button class="btn primary" id="nzc1">📋 Копіювати стовпець оцінок</button><button class="btn" id="nzc2">📋 Копіювати з іменами</button><button class="btn ghost" id="nzcsv">⬇ Усі уроки (Excel/CSV)</button></div>`, { wide: true });
+  const pick = (gs, mode) => {
+    const nums = gs.map(g => g.value);
+    if (!nums.length) return '';
+    if (mode === 'all') return nums.join(', ');
+    if (mode === 'avg') { const v = nums.map(parseFloat).filter(x => !isNaN(x)); return v.length ? String(Math.round(v.reduce((a, b) => a + b, 0) / v.length)) : nums.at(-1); }
+    return nums.at(-1);
+  };
+  const values = (lid, kind, mode) => students.map(st => pick((J.grades[st.id]?.[lid] || []).filter(g => !kind || g.kind === kind).sort((a, b) => a.id - b.id), mode));
+  const cur = () => values(+$('#nzl', m.el).value, $('#nzk', m.el).value, $('#nzm', m.el).value);
+  const draw = () => {
+    const v = cur();
+    $('#nzt', m.el).innerHTML = `<table class="tbl compact nz-table"><thead><tr><th>№</th><th>Учень</th><th>Оцінка</th></tr></thead><tbody>
+      ${students.map((st, i) => `<tr><td>${i + 1}</td><td>${esc(st.name)}</td><td><b>${esc(v[i])}</b></td></tr>`).join('')}</tbody></table>
+      <p class="hint">Порожня клітинка — оцінки немає (у стовпці лишиться порожній рядок, щоб не збився порядок).</p>`;
+  };
+  ['#nzl', '#nzk', '#nzm'].forEach(s => $(s, m.el).onchange = draw); draw();
+  $('#nzc1', m.el).onclick = async () => toast(await copyText(cur().join('\n')) ? `Скопійовано ${students.length} рядків — вставте в стовпець навпроти першого учня` : 'Не вдалося скопіювати', 'ok', 5000);
+  $('#nzc2', m.el).onclick = async () => { const v = cur(); toast(await copyText(students.map((st, i) => `${st.name}\t${v[i]}`).join('\n')) ? 'Скопійовано таблицю «Учень ⇥ Оцінка»' : 'Не вдалося скопіювати', 'ok'); };
+  $('#nzcsv', m.el).onclick = () => {
+    const kind = $('#nzk', m.el).value, mode = $('#nzm', m.el).value;
+    const head = ['№', 'Учень', ...lessons.map(l => `${lessonDate(l.id) ? fmtDate(lessonDate(l.id)).slice(0, 5) + ' ' : ''}${l.title}`)];
+    const cols = lessons.map(l => values(l.id, kind, mode));
+    const rows = [head, ...students.map((st, i) => [i + 1, st.name, ...cols.map(c => c[i])])];
+    const csv = '\ufeff' + rows.map(r => r.map(x => `"${String(x).replace(/"/g, '""')}"`).join(';')).join('\r\n');
+    const name = asciiName(`ocinky-nz-${J.cls.name}.csv`);
+    if (window.InfoKlasApp?.saveFile) return InfoKlasApp.saveFile(name, 'text/csv', btoa(String.fromCharCode(...new TextEncoder().encode(csv))));
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = name; document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   };
 }
 

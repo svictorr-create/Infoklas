@@ -134,4 +134,50 @@ function restoreShortcuts(backup) {
   return {};
 }
 
-module.exports = { isWin, isLinux, normName, parsePs, parseTasklist, processes, kill, findBlocked, setAutostart, disableShortcuts, restoreShortcuts, desktop };
+// ---------- Програми для практичних робіт («🧰 Програми» в кіоску) ----------
+// Команда: "winword.exe", "soffice.exe --writer", "C:\Program Files\X\x.exe --arg", "libreoffice --calc"
+function splitCommand(cmd) {
+  const s = String(cmd || '').trim().replace(/%([^%]+)%/g, (m, v) => process.env[v] ?? m);
+  const exe = /^(.*?\.exe)(\s+.*)?$/i.exec(s);
+  if (exe) return { file: exe[1].replace(/^"|"$/g, ''), args: (exe[2] || '').trim().split(/\s+/).filter(Boolean) };
+  const [file, ...args] = s.split(/\s+/);
+  return { file, args };
+}
+const fs_ = require('fs');
+const run = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 4000, windowsHide: true }); } catch { return ''; } };
+function whereWin(exe) {
+  // як «Пуск»: реєстр App Paths (Office, LibreOffice), потім PATH (notepad, mspaint, calc)
+  for (const root of ['HKLM\\SOFTWARE', 'HKCU\\SOFTWARE', 'HKLM\\SOFTWARE\\WOW6432Node']) {
+    const out = run('reg', ['query', `${root}\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${exe}`, '/ve']);
+    const m = /REG_(?:EXPAND_)?SZ\s+(.+)/.exec(out);
+    if (m) { const p = m[1].trim().replace(/^"|"$/g, '').replace(/%([^%]+)%/g, (x, v) => process.env[v] ?? x); if (fs_.existsSync(p)) return p; }
+  }
+  const w = run('where', [exe]).split(/\r?\n/).find(Boolean);
+  return w ? w.trim() : null;
+}
+const appCache = new Map();
+/** Перша доступна на цьому ПК команда з переліку або null */
+function resolveApp(app) {
+  const key = JSON.stringify([app.win, app.linux]);
+  if (appCache.has(key)) return appCache.get(key);
+  let found = null;
+  for (const c of (isWin ? app.win : app.linux) || []) {
+    const { file, args } = splitCommand(c);
+    if (!file) continue;
+    let full = null;
+    if (isWin) full = /[\\/]/.test(file) ? (fs_.existsSync(file) ? file : null) : whereWin(file);
+    else full = file.startsWith('/') ? (fs_.existsSync(file) ? file : null) : (run('which', [file]).trim() || null);
+    if (full) { found = { file: full, args }; break; }
+  }
+  appCache.set(key, found);
+  return found;
+}
+function launchApp(app, extraArgs = []) {
+  const r = resolveApp(app);
+  if (!r) return false;
+  const { spawn } = require('child_process');
+  spawn(r.file, [...r.args, ...extraArgs], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+  return true;
+}
+
+module.exports = { isWin, isLinux, normName, parsePs, parseTasklist, processes, kill, findBlocked, setAutostart, disableShortcuts, restoreShortcuts, desktop, splitCommand, resolveApp, launchApp };

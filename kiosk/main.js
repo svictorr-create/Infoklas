@@ -64,6 +64,7 @@ let layout = 'locked';   // locked | work | panel
 let labMode = 'none';    // режим уроку від сервера
 let allowQuit = false;
 let blockedApps = [];
+let serverApps = [];   // програми для практичних робіт (з налаштувань вчителя)
 let socket = null;
 
 // ---------- HOTP для офлайн-розблокування ----------
@@ -161,7 +162,7 @@ function connect() {
     socket.emit('device:locked', locked);
     try {
       const r = await fetch(`${cfg.server}/api/device/state?key=${cfg.key}`).then(r => r.json());
-      blockedApps = r.blocked_apps || []; labMode = r.mode || 'none';
+      blockedApps = r.blocked_apps || []; serverApps = r.apps || []; labMode = r.mode || 'none';
       if (!locked) applyLayout(layout);
     } catch {}
   });
@@ -172,7 +173,7 @@ function connect() {
     if (info?.reason === 'lesson-end' && FROM_LOGIN) { showLock(); return; }
     allowQuit = true; app.quit();
   });
-  socket.on('policy', p => { blockedApps = p.blocked_apps || []; });
+  socket.on('policy', p => { blockedApps = p.blocked_apps || []; if (p.apps) serverApps = p.apps; });
   socket.on('lab:mode', m => {
     labMode = m.mode || 'none';
     if (locked) return;
@@ -289,6 +290,21 @@ ipcMain.handle('kiosk:folder-mark-sent', (e, { student, lesson, files }) => {
   const dir = folderOf(student, lesson), m = readMan(dir);
   for (const f of files) m.sent[f.name] = { size: f.size, mtimeMs: f.mtimeMs };
   writeMan(dir, m); return { ok: true };
+});
+
+// ---------- Програми для практичної роботи ----------
+ipcMain.handle('kiosk:apps', () => serverApps.filter(a => platform.resolveApp(a)).map(({ id, name, icon }) => ({ id, name, icon })));
+ipcMain.handle('kiosk:launch', (e, { id, student, lesson, name }) => {
+  const a = serverApps.find(x => x.id === id); if (!a) return { ok: false };
+  const extra = name ? [path.join(folderOf(student, lesson), safeName(name, 120))] : [];
+  return { ok: platform.launchApp(a, extra) };
+});
+// Відкрити файл з робочої папки в програмі за замовчуванням (.docx -> Word / Writer)
+ipcMain.handle('kiosk:open-file', async (e, { student, lesson, name }) => {
+  const p = path.join(folderOf(student, lesson), safeName(name, 120));
+  if (!fs.existsSync(p)) return { ok: false, error: 'Файл не знайдено в папці' };
+  const err = await shell.openPath(p);
+  return { ok: !err, error: err || null };
 });
 
 // ---------- Посилання від вчителя (тест тощо) — відкриваються у вікні кіоску ----------

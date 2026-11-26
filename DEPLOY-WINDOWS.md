@@ -60,7 +60,7 @@ cloudflared tunnel --url http://localhost:3000
 
 ## Крок 2. Інсталятор кіоску для Windows
 
-Потрібен файл `InfoKlas Kiosk Setup 1.2.0.exe`. Два способи його отримати:
+Потрібен файл `InfoKlas Kiosk Setup 1.3.0.exe`. Два способи його отримати:
 
 - **Через GitHub (без встановлення нічого):** завантажте проєкт у свій репозиторій GitHub → вкладка **Actions** → «Збірка кіоску» → **Run workflow**. За ~5 хв у розділі *Artifacts* з'являться `.exe` для Windows і `.deb` для Linux Mint.
 - **На будь-якому ПК з Windows** (де вже є Node.js, наприклад, на сервері з кроку 1):
@@ -84,7 +84,7 @@ cloudflared tunnel --url http://localhost:3000
    ```powershell
    cd E:\infoklas
    Set-ExecutionPolicy -Scope Process Bypass -Force
-   .\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.2.0.exe"
+   .\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.3.0.exe"
    ```
 3. Скрипт попросить пароль для облікового запису учня `uchen` — придумайте один для всіх ПК; знатимете лише ви.
 

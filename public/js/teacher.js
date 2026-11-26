@@ -1022,6 +1022,9 @@ async function settingsPage() {
     <section class="card"><h3>Комп'ютерний клас</h3>
       <label>Кількість комп'ютерів (лише підказка — система питає щоразу, коли ви починаєте урок)<input type="number" id="pcs" min="1" max="60" value="${s.computers}"></label>
       <label>Заборонені програми (кіоск закриває їх під час уроку; по одній назві процесу в рядку; Windows — <code>chrome.exe</code>, Linux — <code>chrome</code>, <code>firefox</code>)<textarea id="ba" rows="6" class="mono">${esc(s.blocked_apps.join('\n'))}</textarea></label>
+      <label>🧰 Програми для практичних робіт — кнопки в кіоску учня (показуються лише встановлені на ПК).
+        <small class="muted">Формат рядка: <code>іконка Назва | команда Windows; запасна | команда Linux</code>. Команда — назва .exe або повний шлях, далі параметри.</small>
+        <textarea id="apps" rows="8" class="mono">${esc(s.apps_text)}</textarea></label>
       <label>Термін дії одноразового коду, хв<input type="number" id="ttl" value="${s.unlock_ttl}"></label>
       <label class="switch"><input type="checkbox" id="uos" ${s.unlock_on_start ? 'checked' : ''}> Розблоковувати кіоски, коли я натискаю «▶ Почати урок»</label><br><br>
       <label class="switch"><input type="checkbox" id="cke" ${s.close_kiosk_on_end ? 'checked' : ''}> Після «🏁 Завершити урок»: кіоск з автозапуску (обліковий запис <code>uchen</code>) <b>блокується</b>, запущений вручну через Veyon — <b>закривається</b></label><br><br>
@@ -1033,7 +1036,7 @@ async function settingsPage() {
       <div class="row wrap"><button class="btn" id="app-srv">✏️ Змінити адресу сервера</button><button class="btn ghost" id="app-rl">🔄 Перезавантажити</button></div></section>` : ''}
     <section class="card"><h3>Пароль вчителя</h3>
       <div class="row wrap"><input type="password" id="op" placeholder="Старий пароль"><input type="password" id="np" placeholder="Новий пароль"><button class="btn" id="cp">Змінити</button></div></section>`, '#/settings');
-  $('#sv').onclick = async () => { await put('/settings', { computers: +$('#pcs').value, blocked_apps: $('#ba').value.split('\n'), unlock_ttl: +$('#ttl').value, close_kiosk_on_end: $('#cke').checked, unlock_on_start: $('#uos').checked }); toast('Збережено'); };
+  $('#sv').onclick = async () => { await put('/settings', { computers: +$('#pcs').value, blocked_apps: $('#ba').value.split('\n'), unlock_ttl: +$('#ttl').value, close_kiosk_on_end: $('#cke').checked, unlock_on_start: $('#uos').checked, apps_text: $('#apps').value }); toast('Збережено'); };
   $('#svpc').onclick = () => { localStorage.setItem('pcNo', $('#pcno').value); toast('Цей браузер тепер — ПК ' + $('#pcno').value); };
   $('#clpc').onclick = () => { localStorage.removeItem('pcNo'); $('#pcno').value = ''; toast('Номер ПК очищено'); };
   $('#app-srv')?.addEventListener('click', () => InfoKlasApp.changeServer());

@@ -12,6 +12,11 @@ contextBridge.exposeInMainWorld('kiosk', {
   isKiosk: true,
   capture: () => ipcRenderer.invoke('kiosk:capture'),
   openUrl: (o) => ipcRenderer.send('kiosk:open-url', o),
+  apps: {
+    list: () => ipcRenderer.invoke('kiosk:apps'),
+    launch: (o) => ipcRenderer.invoke('kiosk:launch', o),
+    openFile: (o) => ipcRenderer.invoke('kiosk:open-file', o),
+  },
   closeUrl: (id) => ipcRenderer.send('kiosk:close-url', { id }),
   folder: {
     info: (o) => ipcRenderer.invoke('kiosk:folder-info', o),

@@ -117,8 +117,8 @@
 1. Відкрийте <https://github.com/svictorr-create/Infoklas/actions>.
 2. Ліворуч оберіть **«Збірка кіоску»** → **Run workflow** → **Run workflow**.
 3. Через 5–10 хв відкрийте запуск і внизу, в розділі **Artifacts**, завантажте:
-   - `infoklas-kiosk-windows` → усередині `InfoKlas Kiosk Setup 1.2.0.exe`
-   - `infoklas-kiosk-linux` → усередині `infoklas-kiosk_1.2.0_amd64.deb`
+   - `infoklas-kiosk-windows` → усередині `InfoKlas Kiosk Setup 1.3.0.exe`
+   - `infoklas-kiosk-linux` → усередині `infoklas-kiosk_1.3.0_amd64.deb`
 
 Файли зберігаються 90 днів, потім збірку можна запустити знову.
 
@@ -129,7 +129,7 @@
 Сервер сам роздає інсталятор і скрипт, а ПК реєструється без вікна налаштування. Для 18 ПК — по 2–3 хвилини на кожен.
 
 **Один раз на сторінці 🔒 Комп'ютери → «⚡ Автоматичне встановлення кіоску»:**
-1. **Завантажте на сервер** `InfoKlas Kiosk Setup 1.2.0.exe` (з GitHub → Actions → «Збірка кіоску» → Artifacts).
+1. **Завантажте на сервер** `InfoKlas Kiosk Setup 1.3.0.exe` (з GitHub → Actions → «Збірка кіоску» → Artifacts).
 2. Перевірте **адресу сервера для учнівських ПК** (наприклад `http://192.168.1.10:3000`; якщо ви на самому сервері — мережеву адресу підставлено автоматично).
 3. Введіть **пароль облікового запису `uchen`** (однаковий для всіх ПК) і за бажанням — автовхід.
 4. **🔑 Створити файл встановлення** — завантажиться `install-kiosk.bat` (ключ діє 8 годин). Скопіюйте його на флешку.
@@ -150,14 +150,14 @@
 ### Вручну (один ПК)
 
 Скопіюйте на ПК (наприклад, з флешки) в одну теку:
-- `InfoKlas Kiosk Setup 1.2.0.exe`
+- `InfoKlas Kiosk Setup 1.3.0.exe`
 - `setup-student.ps1` (з теки `kiosk/windows/` проєкту)
 
 Відкрийте **PowerShell від імені адміністратора** у цій теці та виконайте:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass -Force
-.\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.2.0.exe"
+.\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.3.0.exe"
 ```
 
 Скрипт попросить пароль для облікового запису учня **`uchen`** — придумайте один для всіх ПК (знатимете лише ви).
@@ -182,10 +182,10 @@ Set-ExecutionPolicy -Scope Process Bypass -Force
 
 Підходить і для старих двоядерних ПК (беріть **Linux Mint Xfce Edition**).
 
-Скопіюйте на ПК `infoklas-kiosk_1.2.0_amd64.deb` і `setup-mint.sh` (з теки `kiosk/linux/`), відкрийте термінал у цій теці:
+Скопіюйте на ПК `infoklas-kiosk_1.3.0_amd64.deb` і `setup-mint.sh` (з теки `kiosk/linux/`), відкрийте термінал у цій теці:
 
 ```bash
-sudo bash setup-mint.sh infoklas-kiosk_1.2.0_amd64.deb
+sudo bash setup-mint.sh infoklas-kiosk_1.3.0_amd64.deb
 ```
 
 Скрипт встановить кіоск (команда `infoklas-kiosk`), створить обліковий запис **`uchen`** без прав адміністратора, заборонить перемикання в консоль (Ctrl+Alt+F1…F6) і Ctrl+Alt+Backspace, вимкне гостьовий сеанс.
@@ -268,6 +268,7 @@ sudo bash setup-mint.sh infoklas-kiosk_1.2.0_amd64.deb
 
 ![Налаштування](img/t-settings.png)
 
+0. **🧰 Програми для практичних робіт** — кнопки в кіоску учня. Рядок: `іконка Назва | команда Windows; запасна | команда Linux`, наприклад `📝 Word | winword.exe |` або `🐱 Scratch | C:\Program Files (x86)\Scratch 3\Scratch 3.exe | scratch`. Кіоск сам знаходить програму (реєстр App Paths / PATH) і показує кнопку лише якщо програма є на ПК. Офісні програми працюють у режимі «🛠 Практична»; у режимах «Презентація» й «Увага!» кіоск на весь екран.
 1. **Заборонені програми** — назви процесів, які кіоск закриває під час уроку. Windows: `chrome.exe`, Linux: `chrome`, `firefox`. Список уже заповнено типовими браузерами й іграми.
 2. **Закривати кіоск після «Завершити урок»** — увімкнено за замовчуванням.
 3. **Пароль вчителя.**

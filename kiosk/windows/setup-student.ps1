@@ -3,7 +3,7 @@
   Запуск: правою кнопкою на PowerShell → «Запустити від імені адміністратора», потім:
 
     Set-ExecutionPolicy -Scope Process Bypass -Force
-    .\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.2.0.exe"
+    .\setup-student.ps1 -Installer ".\InfoKlas Kiosk Setup 1.3.0.exe"
 
   Кіоск стартує САМ, коли учень входить в обліковий запис "uchen" (заблокованим);
   розблоковується, коли вчитель натискає «Почати урок», і знову блокується після «Завершити урок».

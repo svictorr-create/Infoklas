@@ -6,6 +6,7 @@ let shellFn = null;
 let cur = null;          // поточний урок на екрані
 let showAll = localStorage.getItem('showAllSteps') === '1';
 let pipWin = null;
+let appsCache = null;   // програми, встановлені на цьому ПК (з кіоску)
 
 export function registerStudent(shell) {
   shellFn = shell;
@@ -352,8 +353,10 @@ function drawWork() {
   box.innerHTML = `<div class="work-head"><h3>📂 Моя робоча папка</h3>
       ${kiosk ? `<button class="btn primary" id="open-folder">📂 Відкрити папку</button>` : ''}</div>
     ${kiosk && shortPath ? `<p class="folder-path">📁 ${esc(shortPath)}</p>` : ''}
+    ${kiosk && appsCache?.length ? `<p><b>🧰 Програми</b> <span class="muted small">— відкрий програму для практичної роботи</span></p>
+      <div class="apps-bar">${appsCache.map(a => `<button class="btn app-btn" data-app="${esc(a.id)}"><span class="app-ic">${esc(a.icon)}</span>${esc(a.name)}</button>`).join('')}</div>` : ''}
     ${wf.length ? `<p><b>Файли для роботи</b> ${kiosk ? '<span class="muted small">— уже скопійовані у твою папку</span>' : '<span class="muted small">— завантаж і відкрий</span>'}</p>
-      <div class="files">${wf.map(m => kiosk ? `<span class="file">📄 ${esc(workName(m))}</span>` : `<a class="file" href="${esc(m.url)}" download="${esc(workName(m))}">⬇ ${esc(workName(m))}</a>`).join('')}</div>` : ''}
+      <div class="files">${wf.map(m => kiosk ? `<span class="file">📄 ${esc(workName(m))} ${state.kiosk?.apps ? `<button class="btn sm primary" data-openf="${esc(workName(m))}">Відкрити</button>` : ''}</span>` : `<a class="file" href="${esc(m.url)}" download="${esc(workName(m))}">⬇ ${esc(workName(m))}</a>`).join('')}</div>` : ''}
     <p><b>Мої результати</b> ${mine.length ? '' : '<span class="muted small">— ще нічого не надіслано</span>'}</p>
     ${mine.length ? `<div class="files">${mine.map(f => `<span class="file ${f.submission_id ? 'done' : ''}">${f.submission_id ? '✅' : '📤'} <a href="/api/files/${f.id}">${esc(f.name)}</a> <small>${fmtSize(f.size)}${f.author !== state.user.name ? ' · ' + esc(f.author) : ''}</small>
       ${!f.submission_id && f.author === state.user.name ? `<button class="x" data-delfile="${f.id}" title="Прибрати">✕</button>` : ''}</span>`).join('')}</div>` : ''}
@@ -363,6 +366,20 @@ function drawWork() {
       <p class="hint">Працюєш вдома? Завантаж файли для роботи, виконай завдання і надішли результат тут.</p>`}`;
   if (keep) $('#up-form', box)?.replaceWith(keep);
   $('#open-folder', box)?.addEventListener('click', async () => { await prepareFolder(); state.kiosk.folder.open(folderKey()); });
+  // Програма відкрилась -> крок інструкції маленьким вікном поверх неї
+  const pinSteps = () => { if (!cur?.steps?.length) return; state.kiosk.setLayout('panel'); location.hash = '#/mini/' + cur.id; };
+  $$('[data-app]', box).forEach(b => b.onclick = async () => {
+    const r = await state.kiosk.apps.launch({ id: b.dataset.app });
+    if (r?.ok) { toast(`${b.textContent.trim()} запускається… Крок інструкції — поверх вікон`, 'ok', 4000); setTimeout(pinSteps, 1200); }
+    else toast('Не вдалося запустити програму', 'err');
+  });
+  $$('[data-openf]', box).forEach(b => b.onclick = async () => {
+    await prepareFolder();
+    const r = await state.kiosk.apps.openFile({ ...folderKey(), name: b.dataset.openf });
+    if (r?.ok) { toast(`Відкриваю ${b.dataset.openf}… Збережи роботу в цю ж папку`, 'ok', 5000); setTimeout(pinSteps, 1500); }
+    else toast('Не вдалося відкрити файл: ' + (r?.error || ''), 'err');
+  });
+  if (kiosk && state.kiosk.apps && appsCache === null) { appsCache = []; state.kiosk.apps.list().then(a => { appsCache = a; drawWork(); }).catch(() => {}); }
   $('#send-folder', box)?.addEventListener('click', async () => {
     const n = await sendFolderResults(false);
     toast(n ? `Надіслано файлів: ${n}` : 'У папці немає нових чи змінених файлів', n ? 'ok' : 'info'); drawWork();

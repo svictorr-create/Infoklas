@@ -12,6 +12,8 @@ const U = require('./util');
 const { autoSeat } = require('./seating');
 const { makeZip, safeName } = require('./zip');
 const Names = require('./names');
+const Apps = require('./apps');
+const appsList = () => Apps.parseApps(setting('allowed_apps_text', Apps.DEFAULT_APPS_TEXT));
 
 U.setSecret(setting('secret'));
 const PORT = process.env.PORT || 3000;
@@ -1036,11 +1038,13 @@ app.post('/api/notifications/read', auth, h(req => { run('UPDATE notifications S
 // ======================================================================
 // Налаштування, кіоск-пристрої, коди розблокування
 // ======================================================================
-app.get('/api/settings', auth, teacher, h(() => ({ computers: setting('computers', 10), blocked_apps: setting('blocked_apps', []), unlock_ttl: setting('unlock_ttl', 15), close_kiosk_on_end: setting('close_kiosk_on_end', true), unlock_on_start: setting('unlock_on_start', true) })));
+app.get('/api/settings', auth, teacher, h(() => ({ computers: setting('computers', 10), blocked_apps: setting('blocked_apps', []), unlock_ttl: setting('unlock_ttl', 15), close_kiosk_on_end: setting('close_kiosk_on_end', true), unlock_on_start: setting('unlock_on_start', true), apps_text: setting('allowed_apps_text', Apps.DEFAULT_APPS_TEXT) })));
 app.put('/api/settings', auth, teacher, h(req => {
   const b = req.body;
   if (b.computers != null) setSetting('computers', Math.max(1, Math.min(60, parseInt(b.computers, 10) || 1)));
-  if (Array.isArray(b.blocked_apps)) { setSetting('blocked_apps', b.blocked_apps.map(s => s.trim().toLowerCase()).filter(Boolean)); io.to('devices').emit('policy', { blocked_apps: setting('blocked_apps') }); }
+  if (typeof b.apps_text === 'string') setSetting('allowed_apps_text', b.apps_text.trim() || Apps.DEFAULT_APPS_TEXT);
+  if (Array.isArray(b.blocked_apps)) setSetting('blocked_apps', b.blocked_apps.map(s => s.trim().toLowerCase()).filter(Boolean));
+  if (Array.isArray(b.blocked_apps) || typeof b.apps_text === 'string') io.to('devices').emit('policy', { blocked_apps: setting('blocked_apps'), apps: appsList() });
   if (b.close_kiosk_on_end != null) setSetting('close_kiosk_on_end', !!b.close_kiosk_on_end);
   if (b.unlock_on_start != null) setSetting('unlock_on_start', !!b.unlock_on_start);
   if (b.unlock_ttl != null) setSetting('unlock_ttl', Math.max(1, parseInt(b.unlock_ttl, 10) || 15));
@@ -1191,7 +1195,7 @@ app.post('/api/device/unlock', h(req => {
 app.get('/api/device/state', h(req => {
   const d = deviceByKey(req.query.key); if (!d) bad('Пристрій не зареєстровано');
   const s = get("SELECT id, mode FROM sessions WHERE status='active' ORDER BY id DESC LIMIT 1");
-  return { locked: !!d.locked, computer_no: d.computer_no, mode: s ? s.mode : 'none', session_id: s?.id || null, blocked_apps: setting('blocked_apps', []) };
+  return { locked: !!d.locked, computer_no: d.computer_no, mode: s ? s.mode : 'none', session_id: s?.id || null, blocked_apps: setting('blocked_apps', []), apps: appsList() };
 }));
 
 // ======================================================================

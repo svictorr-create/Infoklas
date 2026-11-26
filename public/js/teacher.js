@@ -205,13 +205,14 @@ async function studentProfile(id) {
     <div class="legend">${Object.entries(counts).map(([k, n]) => `<span><span class="st ${STATES[k].cls}">${STATES[k].icon}</span> ${STATES[k].label}: <b>${n}</b></span>`).join('')}</div>
     <div class="grid2">
       <section class="card"><h3>Уроки</h3><table class="tbl compact">${d.lessons.map(l => `<tr><td><span class="st ${STATES[l.status?.state || 'none'].cls}">${STATES[l.status?.state || 'none'].icon}</span></td>
-        <td><a href="#" data-cell="${l.id}">${esc(l.title)}</a></td><td class="muted">${l.status?.total ? `сам ${l.status.self}, у групі ${l.status.group} / ${l.status.total}` : ''}${l.status?.home ? ' · 🏠' : ''}</td></tr>`).join('')}</table></section>
+        <td><a href="#" data-cell="${l.id}">${esc(l.title)}</a></td><td class="muted">${l.status?.total ? `сам ${l.status.self}, у групі ${l.status.group} / ${l.status.total}` : ''}${l.status?.home ? ' · 🏠' : ''}${d.notes.some(n => n.lesson_id === l.id) ? ' · 📝' : ''}</td></tr>`).join('')}</table></section>
+      <section class="card"><h3>📝 Нотатки вчителя</h3>${d.notes.map(n => `<div class="note-item"><a href="#" data-cell="${n.lesson_id}"><b>${esc(n.lesson_title || 'Урок')}</b></a> <small class="muted">${fmtDate(n.updated_at, true)}</small><div class="note-text">${esc(n.text)}</div></div>`).join('') || '<p class="muted">Поки немає. Нотатку можна записати на уроці (клік по учню) або в журналі (клік по клітинці).</p>'}</section>
       <section class="card"><h3>Оцінки</h3>${d.grades.map(g => `<div class="grade-row"><span class="grade">${esc(g.value)}</span> ${esc(g.kind)} ${g.lesson_title ? '— ' + esc(g.lesson_title) : ''} <small class="muted">${fmtDate(g.created_at)} ${esc(g.comment)}</small></div>`).join('') || '<p class="muted">немає</p>'}</section>
       <section class="card"><h3>Відвідування</h3><table class="tbl compact">${d.attendance.map(a => `<tr><td>${fmtDate(a.date)}</td><td>${esc(a.title || '')}</td><td>${{ present: '✅ був', late: '⏰ запізнився', absent: '❌ відсутній' }[a.status]}</td></tr>`).join('') || '<tr><td class="muted">немає записів</td></tr>'}</table></section>
       <section class="card"><h3>Де сидів і з ким</h3><table class="tbl compact">${d.seats.map(s => `<tr><td>${fmtDate(s.date)}</td><td>ПК ${s.computer_no}</td><td>${s.was_driver ? '⌨️ за клавіатурою' : '🧭 штурман'}</td><td class="muted">${esc(s.mates || 'сам')}</td></tr>`).join('') || '<tr><td class="muted">немає</td></tr>'}</table></section>
       <section class="card"><h3>Входи в систему</h3><table class="tbl compact">${d.logins.map(l => `<tr><td>${fmtDate(l.at, true)}</td><td>${l.place === 'home' ? '🏠 вдома' : '🏫 ПК ' + l.computer_no + (l.host ? ' · ' + esc(l.host) : '')}</td><td class="muted">${esc(l.client)} ${esc(l.ip || '')}</td></tr>`).join('')}</table></section>
     </div>`, '#/');
-  $$('[data-cell]', main).forEach(a => a.onclick = e => { e.preventDefault(); const l = d.lessons.find(x => x.id === +a.dataset.cell); cellDialog({ id: d.student.id, name: d.student.name }, l, l.status, d.grades.filter(g => g.lesson_id === l.id), render, d.cls?.id); });
+  $$('[data-cell]', main).forEach(a => a.onclick = e => { e.preventDefault(); const l = d.lessons.find(x => x.id === +a.dataset.cell); cellDialog({ id: d.student.id, name: d.student.name }, l, l.status, d.grades.filter(g => g.lesson_id === l.id), render, d.cls?.id, d.notes.find(n => n.lesson_id === l.id), render); });
 }
 
 // =====================================================================
@@ -517,7 +518,7 @@ async function livePage(id) {
     const p = progressOf(st);
     const role = st.seat?.role === 'driver' ? '⌨️' : st.seat ? '🧭' : '';
     return `<span class="chip ${st.att === 'absent' ? 'absent' : ''} ${st.focusLost ? 'lost' : ''}" draggable="true" data-sid="${st.id}" title="${esc(st.name)} — ${p}/${total} кроків">
-      ${role} ${esc(st.name.split(' ').slice(0, 2).reverse().join(' '))}${st.finished?.finished_at ? ' ✅' : ''}</span>`;
+      ${role} ${esc(st.name.split(' ').slice(0, 2).reverse().join(' '))}${st.finished?.finished_at ? ' ✅' : ''}${st.note ? ' <span title="' + esc(st.note.text) + '">📝</span>' : ''}</span>`;
   }
   function bind() {
     $$('.chip').forEach(c => {
@@ -593,7 +594,9 @@ async function livePage(id) {
       <h4>Кроки</h4><ol class="steps-mini">${(L.lesson?.steps || []).map(s => `<li class="${done.has(s.id) ? 'ok' : ''}">${done.get(s.id) === 'self' ? '✋' : done.get(s.id) === 'group' ? '👥' : '·'} ${esc(plainText(s.text).slice(0, 70))}</li>`).join('')}</ol>
       <h4>Вміння за цей урок</h4>
       <div class="row"><button class="btn" data-m="1">⭐ Вміє</button><button class="btn" data-m="0">⚠️ Не вміє</button><button class="btn ghost" data-m="">скинути</button></div>
-      <p class="hint">Перевірка: попросіть учня показати/пояснити крок. Це найточніший спосіб дізнатися, хто вміє, а хто лише спостерігав.</p>`);
+      <p class="hint">Перевірка: попросіть учня показати/пояснити крок. Це найточніший спосіб дізнатися, хто вміє, а хто лише спостерігав.</p>
+      ${L.lesson ? noteBox(st.note) : ''}`, { onClose: () => m.el.__saveNote?.() });
+    if (L.lesson) bindNote(m.el, sid, L.lesson.id, n => { st.note = n; draw(); });
     $('#mvpc', m.el).onchange = async e => {
       const pc = +e.target.value || null;
       const hasDriver = pc && L.students.some(x => x.seat?.computer_no === pc && x.seat.role === 'driver' && x.id !== sid);
@@ -750,14 +753,18 @@ async function journalPage(classId) {
         const gr = Object.values(J.grades[st.id] || {}).flat().map(g => parseFloat(g.value)).filter(x => !isNaN(x));
         return `<tr><td class="sticky"><a href="#/student/${st.id}">${esc(st.name)}</a> <a class="folder-link" href="#/folder/${st.id}" title="Папка учня — документи з його комп'ютера">📂</a></td>
         ${J.lessons.map(l => { const c = J.cells[st.id][l.id]; const S = STATES[c.state]; const g = (J.grades[st.id]?.[l.id] || []);
-          return `<td class="cell ${S.cls}" data-s="${st.id}" data-l="${l.id}" title="${esc(S.label)}${c.total ? ` · сам ${c.self}, у групі ${c.group} з ${c.total}` : ''}">${S.icon}${c.home ? '<sup>🏠</sup>' : ''}${c.files?.length ? '<sup title="Є файли">📎</sup>' : ''}${g.length ? `<b class="g">${g.map(x => esc(x.value)).join(',')}</b>` : ''}</td>`; }).join('')}
+          return `<td class="cell ${S.cls}" data-s="${st.id}" data-l="${l.id}" title="${esc(S.label)}${c.total ? ` · сам ${c.self}, у групі ${c.group} з ${c.total}` : ''}">${S.icon}${c.home ? '<sup>🏠</sup>' : ''}${c.files?.length ? '<sup title="Є файли">📎</sup>' : ''}${J.notes?.[st.id]?.[l.id] ? `<sup class="note-mark" title="${esc(J.notes[st.id][l.id].text)}">📝</sup>` : ''}${g.length ? `<b class="g">${g.map(x => esc(x.value)).join(',')}</b>` : ''}</td>`; }).join('')}
         <td class="muted">${st.driver}/${st.seated}</td><td><b>${gr.length ? (gr.reduce((a, b) => a + b, 0) / gr.length).toFixed(1) : ''}</b></td></tr>`; }).join('')}</tbody>
     </table></div>
-    <p class="hint">Клікніть клітинку, щоб побачити деталі (кроки, скриншот, самооцінку), підтвердити вміння чи поставити оцінку.</p>`, '#/journal');
+    <p class="hint">Клікніть клітинку, щоб побачити деталі (кроки, скриншот, самооцінку), підтвердити вміння, поставити оцінку чи записати 📝 нотатку.</p>`, '#/journal');
   $('#cls').onchange = e => { location.hash = '#/journal/' + e.target.value; };
   $$('.cell', main).forEach(td => td.onclick = () => {
     const st = J.students.find(s => s.id === +td.dataset.s), l = J.lessons.find(x => x.id === +td.dataset.l);
-    cellDialog(st, l, J.cells[st.id][l.id], J.grades[st.id]?.[l.id] || [], render, J.cls.id);
+    cellDialog(st, l, J.cells[st.id][l.id], J.grades[st.id]?.[l.id] || [], render, J.cls.id, J.notes?.[st.id]?.[l.id], n => {
+      J.notes ||= {}; (J.notes[st.id] ||= {})[l.id] = n || undefined;
+      td.querySelectorAll('.note-mark').forEach(x => x.replaceWith());
+      if (n) td.insertAdjacentHTML('beforeend', `<sup class="note-mark" title="${esc(n.text)}">📝</sup>`);
+    });
   });
   $('#nzx').onclick = () => nzExportDialog(J);
   $('#csv').onclick = () => {
@@ -824,7 +831,39 @@ function nzExportDialog(J) {
   };
 }
 
-function cellDialog(st, l, c, grades, after, classId) {
+// ---------- 📝 Нотатки вчителя: на кожного учня на кожен урок (учень їх не бачить) ----------
+const NOTE_TAGS = ['👍 працює самостійно', '🤝 допомагає іншим', '💡 цікаве рішення', '❓ потребує допомоги', '🐢 не встигає', '😶 відволікається', '⌨️ проблеми з ПК'];
+function noteBox(note) {
+  return `<div class="note-box"><h4>📝 Нотатки вчителя <small class="muted">— бачите лише ви</small></h4>
+    <div class="note-tags">${NOTE_TAGS.map(t => `<button type="button" class="btn sm ghost" data-ntag="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <textarea class="note-ta" rows="4" placeholder="Що вдається, що ні, спостереження, що перевірити наступного разу…">${esc(note?.text || '')}</textarea>
+    <small class="muted note-st">${note?.updated_at ? 'Збережено ' + fmtDate(note.updated_at, true) : 'Зберігається автоматично'}</small></div>`;
+}
+function bindNote(root, student_id, lesson_id, onSaved) {
+  const ta = $('.note-ta', root), st = $('.note-st', root);
+  if (!ta) return;
+  let last = ta.value, timer = null;
+  const save = async () => {
+    clearTimeout(timer);
+    if (ta.value === last) return;
+    const text = ta.value; st.textContent = 'Зберігаю…';
+    try {
+      const r = await put('/notes', { student_id, lesson_id, text });
+      last = text; st.textContent = r.updated_at ? 'Збережено ' + fmtDate(r.updated_at, true) : 'Нотатку видалено';
+      onSaved?.(text.trim() ? { text, updated_at: r.updated_at } : null);
+    } catch { st.textContent = '⚠️ Не збережено — перевірте зв\'язок'; }
+  };
+  ta.oninput = () => { st.textContent = '…'; clearTimeout(timer); timer = setTimeout(save, 800); };
+  ta.onblur = save;
+  $$('[data-ntag]', root).forEach(b => b.onclick = () => {
+    const d = new Date(), line = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')} ${b.dataset.ntag}`;
+    ta.value = ta.value.trim() ? ta.value.replace(/\s*$/, '') + '\n' + line : line;
+    ta.focus(); save();
+  });
+  root.__saveNote = save;
+}
+
+function cellDialog(st, l, c, grades, after, classId, note, onNote) {
   c = c || { state: 'none', total: 0, self: 0, group: 0 };
   const sa = c.self_assess ? Object.entries(c.self_assess) : [];
   const m = modal(`<h3>${esc(st.name)} — ${esc(l.title)}</h3>
@@ -843,7 +882,9 @@ function cellDialog(st, l, c, grades, after, classId) {
     ${grades.map(g => `<div class="grade-row"><span class="grade">${esc(g.value)}</span> ${esc(g.kind)} <small class="muted">${esc(g.comment)}</small> <button class="btn sm ghost" data-dg="${g.id}">🗑</button></div>`).join('')}
     <div class="row wrap"><select id="gv">${Array.from({ length: 12 }, (_, i) => `<option>${12 - i}</option>`).join('')}<option>н/а</option></select>
       <select id="gk"><option>Практична робота</option><option>Домашня робота</option><option>Тематична</option><option>Усна відповідь</option></select>
-      <input id="gc" placeholder="Коментар для учня (що добре, що покращити)"><button class="btn primary" id="ag">Поставити</button></div>`);
+      <input id="gc" placeholder="Коментар для учня (що добре, що покращити)"><button class="btn primary" id="ag">Поставити</button></div>
+    ${noteBox(note)}`, { onClose: () => m.el.__saveNote?.() });
+  bindNote(m.el, st.id, l.id, onNote);
   $$('[data-m]', m.el).forEach(b => b.onclick = async () => { await put('/mastery', { student_id: st.id, lesson_id: l.id, mastery: b.dataset.m === '' ? null : +b.dataset.m }); m.close(); after(); });
   $$('[data-dg]', m.el).forEach(b => b.onclick = async () => { await del('/grades/' + b.dataset.dg); m.close(); after(); });
   $('#ag', m.el).onclick = async () => { await api('/grades', { body: { student_id: st.id, lesson_id: l.id, value: $('#gv', m.el).value, kind: $('#gk', m.el).value, comment: $('#gc', m.el).value } }); toast('Оцінку виставлено, учень отримав сповіщення'); m.close(); after(); };

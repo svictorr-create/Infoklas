@@ -190,6 +190,12 @@ for (const [col, type] of [['code', 'TEXT'], ['autologin', 'INTEGER DEFAULT 0']]
 if (!all('PRAGMA table_info(login_log)').some(c => c.name === 'host')) db.exec('ALTER TABLE login_log ADD COLUMN host TEXT');
 // Міграція: кількість комп'ютерів зберігається окремо для кожного уроку
 if (!all("PRAGMA table_info(sessions)").some(c => c.name === 'computers')) db.exec('ALTER TABLE sessions ADD COLUMN computers INTEGER');
+// Нотатки вчителя: на кожного учня на кожен урок (бачить лише вчитель)
+db.exec(`CREATE TABLE IF NOT EXISTS teacher_notes (
+  student_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  lesson_id INTEGER REFERENCES lessons(id) ON DELETE CASCADE,
+  text TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (student_id, lesson_id))`);
 if (setting('computers') == null) setSetting('computers', 10);
 const LINUX_APPS = ['chrome', 'chromium', 'chromium-browser', 'firefox', 'firefox-bin', 'opera', 'brave', 'vivaldi-bin', 'yandex_browser',
   'steam', 'discord', 'telegram-desktop', 'minetest', 'supertuxkart'];

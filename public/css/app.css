@@ -363,3 +363,12 @@ pre.cmd { background: #1d2433; color: #e9ecf3; padding: 10px 12px; border-radius
 .apps-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 14px; }
 .app-btn { flex-direction: column; gap: 2px; min-width: 104px; padding: 10px 12px; font-size: .88em; }
 .app-btn .app-ic { font-size: 1.8em; line-height: 1; }
+
+/* 📝 Нотатки вчителя */
+.note-box { margin-top: 12px; padding: 10px; background: #fffbea; border: 1px solid #f1e3a3; border-radius: 10px; }
+.note-box h4 { margin: 0 0 6px; }
+.note-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.note-ta { width: 100%; box-sizing: border-box; }
+.note-item { padding: 6px 0; border-bottom: 1px solid #eee; } .note-item:last-child { border: 0; }
+.note-text { white-space: pre-wrap; font-size: .92em; }
+.journal .note-mark { font-size: .7em; }

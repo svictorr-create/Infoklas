@@ -485,12 +485,14 @@ app.get('/api/sessions/:id/live', auth, teacher, h(req => {
   const prog = {};
   if (stepIds.length) for (const p of all(`SELECT student_id, step_id, via FROM progress WHERE step_id IN (${stepIds.join(',')})`)) (prog[p.student_id] ||= []).push(p);
   const fin = Object.fromEntries(lesson ? all('SELECT student_id, finished_at, screenshot, mastery FROM lesson_status WHERE lesson_id=?', lesson.id).map(r => [r.student_id, r]) : []);
+  const notes = Object.fromEntries(lesson ? all('SELECT student_id, text, updated_at FROM teacher_notes WHERE lesson_id=?', lesson.id).map(r => [r.student_id, { text: r.text, updated_at: r.updated_at }]) : []);
   for (const st of students) {
     st.att = att[st.id] || null; st.seat = seats[st.id] || null;
     st.online = online.has(st.id) ? [...online.get(st.id).values()].map(v => v.pc).filter(Boolean) : null;
     st.steps = (prog[st.id] || []).map(p => ({ step_id: p.step_id, via: p.via }));
     st.finished = fin[st.id] || null;
     st.focusLost = focusAlerts.get(st.id) || null;
+    st.note = notes[st.id] || null;
   }
   const help = all(`SELECT h.*, u.name, st.text step_text, st.position step_pos FROM help_requests h JOIN users u ON u.id=h.student_id
     JOIN steps st ON st.id=h.step_id WHERE h.session_id=? ORDER BY h.status='open' DESC, h.id DESC`, s.id);
@@ -909,6 +911,16 @@ app.post('/api/grades', auth, teacher, h(req => {
   return { id };
 }));
 app.delete('/api/grades/:id', auth, teacher, h(req => { run('DELETE FROM grades WHERE id=?', req.params.id); return { ok: true }; }));
+// Нотатки вчителя (учень їх не бачить). Порожній текст — видалити.
+app.put('/api/notes', auth, teacher, h(req => {
+  const student_id = +req.body.student_id, lesson_id = +req.body.lesson_id;
+  if (!student_id || !lesson_id) bad('Не вказано учня або урок');
+  const text = String(req.body.text ?? '').slice(0, 20000);
+  if (text.trim()) run(`INSERT INTO teacher_notes(student_id,lesson_id,text,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(student_id,lesson_id) DO UPDATE SET text=excluded.text, updated_at=excluded.updated_at`, student_id, lesson_id, text);
+  else run('DELETE FROM teacher_notes WHERE student_id=? AND lesson_id=?', student_id, lesson_id);
+  return { ok: true, updated_at: text.trim() ? get('SELECT updated_at FROM teacher_notes WHERE student_id=? AND lesson_id=?', student_id, lesson_id).updated_at : null };
+}));
 app.put('/api/mastery', auth, teacher, h(req => {
   const { student_id, lesson_id, mastery } = req.body;
   run(`INSERT INTO lesson_status(student_id,lesson_id,mastery) VALUES(?,?,?) ON CONFLICT(student_id,lesson_id) DO UPDATE SET mastery=excluded.mastery`, student_id, lesson_id, mastery ?? null);
@@ -927,7 +939,9 @@ app.get('/api/classes/:id/journal', auth, teacher, h(req => {
   const sessions = all(`SELECT id, lesson_id, date, status, cancel_reason FROM sessions WHERE class_id=? ORDER BY date`, cls.id);
   const hands = Object.fromEntries(all(`SELECT s.student_id, SUM(s.was_driver) d, COUNT(*) n FROM seating s JOIN sessions x ON x.id=s.session_id WHERE x.class_id=? GROUP BY s.student_id`, cls.id).map(r => [r.student_id, r]));
   students.forEach(s => { s.driver = hands[s.id]?.d || 0; s.seated = hands[s.id]?.n || 0; });
-  return { cls, students, lessons, cells, grades, sessions };
+  const notes = {};
+  for (const n of all(`SELECT student_id, lesson_id, text, updated_at FROM teacher_notes WHERE student_id IN (SELECT id FROM users WHERE class_id=?)`, cls.id)) (notes[n.student_id] ||= {})[n.lesson_id] = { text: n.text, updated_at: n.updated_at };
+  return { cls, students, lessons, cells, grades, sessions, notes };
 }));
 
 app.get('/api/students/:id/profile', auth, teacher, h(req => {
@@ -940,6 +954,7 @@ app.get('/api/students/:id/profile', auth, teacher, h(req => {
   return {
     student: st, cls, lessons: lessonIds.map(id => ({ ...lessons.find(l => l.id === id), status: status[id] })),
     grades: all('SELECT g.*, l.title lesson_title FROM grades g LEFT JOIN lessons l ON l.id=g.lesson_id WHERE student_id=? ORDER BY g.id DESC', st.id),
+    notes: all('SELECT n.lesson_id, n.text, n.updated_at, l.title lesson_title FROM teacher_notes n LEFT JOIN lessons l ON l.id=n.lesson_id WHERE n.student_id=? ORDER BY n.updated_at DESC', st.id),
     logins: all('SELECT * FROM login_log WHERE user_id=? ORDER BY id DESC LIMIT 50', st.id),
     attendance: all(`SELECT a.status, x.date, l.title FROM attendance a JOIN sessions x ON x.id=a.session_id LEFT JOIN lessons l ON l.id=x.lesson_id WHERE a.student_id=? ORDER BY x.date DESC`, st.id),
     seats: all(`SELECT s.computer_no, s.role, s.was_driver, x.date, (SELECT GROUP_CONCAT(u.name, ', ') FROM seating s2 JOIN users u ON u.id=s2.student_id WHERE s2.session_id=s.session_id AND s2.computer_no=s.computer_no AND s2.student_id<>s.student_id) mates

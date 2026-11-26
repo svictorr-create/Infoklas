@@ -1023,7 +1023,7 @@ async function settingsPage() {
       <label>Кількість комп'ютерів (лише підказка — система питає щоразу, коли ви починаєте урок)<input type="number" id="pcs" min="1" max="60" value="${s.computers}"></label>
       <label>Заборонені програми (кіоск закриває їх під час уроку; по одній назві процесу в рядку; Windows — <code>chrome.exe</code>, Linux — <code>chrome</code>, <code>firefox</code>)<textarea id="ba" rows="6" class="mono">${esc(s.blocked_apps.join('\n'))}</textarea></label>
       <label>🧰 Програми для практичних робіт — кнопки в кіоску учня (показуються лише встановлені на ПК).
-        <small class="muted">Формат рядка: <code>іконка Назва | команда Windows; запасна | команда Linux</code>. Команда — назва .exe або повний шлях, далі параметри.</small>
+        <small class="muted">Формат рядка: <code>іконка Назва | команда Windows; запасна | команда Linux</code>. Команда — назва .exe або повний шлях, далі параметри. Очистіть поле й збережіть — повернеться стандартний список.</small>
         <textarea id="apps" rows="8" class="mono">${esc(s.apps_text)}</textarea></label>
       <label>Термін дії одноразового коду, хв<input type="number" id="ttl" value="${s.unlock_ttl}"></label>
       <label class="switch"><input type="checkbox" id="uos" ${s.unlock_on_start ? 'checked' : ''}> Розблоковувати кіоски, коли я натискаю «▶ Почати урок»</label><br><br>

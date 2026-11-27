@@ -14,6 +14,17 @@ const { makeZip, safeName } = require('./zip');
 const Names = require('./names');
 const Apps = require('./apps');
 const appsList = () => Apps.parseApps(setting('allowed_apps_text', Apps.DEFAULT_APPS_TEXT));
+const AI = require('./ai');
+const aiServices = () => AI.parseServices(setting('ai_services_text', AI.DEFAULT_SERVICES_TEXT));
+// Правило ШІ для заняття: змінене вчителем під час уроку, інакше — з налаштувань уроку
+const aiPolicyOf = s => AI.norm(s?.ai_policy || (s?.lesson_id ? get('SELECT ai_policy FROM lessons WHERE id=?', s.lesson_id)?.ai_policy : null));
+// Що кіоск має блокувати: під час активного уроку з правилом «заборонено»
+function deviceAi() {
+  const s = get("SELECT * FROM sessions WHERE status='active' ORDER BY id DESC LIMIT 1");
+  const policy = s ? aiPolicyOf(s) : null;
+  return { policy, block: policy === 'deny', hosts: AI.hostsFor(aiServices()), apps: AI.APPS };
+}
+const emitDeviceAi = () => io.to('devices').emit('ai:policy', deviceAi());
 
 U.setSecret(setting('secret'));
 const PORT = process.env.PORT || 3000;
@@ -319,7 +330,12 @@ app.get('/api/lessons/:id', auth, h(req => {
     }
     l.place = sess && sess.lesson_id === id && req.pc ? 'class' : 'home';
     l.workfiles = l.materials.filter(m => m.kind === 'workfile');
-    l.materials = l.materials.filter(m => m.kind !== 'workfile');
+    l.worklinks = l.materials.filter(m => m.kind === 'worklink');
+    l.materials = l.materials.filter(m => m.kind !== 'workfile' && m.kind !== 'worklink');
+    // правило ШІ: на уроці в класі — як вирішив вчитель зараз, вдома — як у налаштуваннях уроку
+    l.ai = AI.norm(sess && sess.lesson_id === id ? aiPolicyOf(sess) : l.ai_policy);
+    l.ai_info = AI.LEVELS[l.ai];
+    l.ai_services = l.ai === 'deny' ? [] : aiServices();
     l.my_files = filesFor(me, id);
     // посилання від вчителя: поточний урок + останні уроки цього класу з цією темою
     l.links = all(`SELECT k.id, k.url, k.title, k.lock, k.created_at FROM session_links k JOIN sessions x ON x.id=k.session_id
@@ -332,6 +348,8 @@ app.put('/api/lessons/:id', auth, teacher, h(req => {
   tx(() => {
     run(`UPDATE lessons SET title=?, objectives=?, why=?, success_criteria=?, theory=?, homework=?, unit_id=COALESCE(?,unit_id), position=COALESCE(?,position) WHERE id=?`,
       b.title, b.objectives || '', b.why || '', b.success_criteria || '', b.theory || '', b.homework || '', b.unit_id ?? null, b.position ?? null, id);
+    if (b.ai_policy) run('UPDATE lessons SET ai_policy=? WHERE id=?', AI.norm(b.ai_policy), id);
+    if (b.ai_policy) setImmediate(emitDeviceAi);
     if (Array.isArray(b.steps)) {
       // зберігаємо id наявних кроків, щоб не втратити прогрес і пояснення
       const keep = new Set();
@@ -433,6 +451,7 @@ app.post('/api/sessions', auth, teacher, h(req => {
   const lesson = get('SELECT title FROM lessons WHERE id=?', lesson_id);
   io.to('class:' + class_id).emit('session', { id, lesson_id, mode: 'work', title: lesson?.title });
   io.to('devices').emit('lab:mode', { mode: 'work', session_id: id });
+  emitDeviceAi();
   // Кіоски, що стартували заблокованими (автозапуск в обліковому записі учня), розблоковуються на початку уроку
   if (setting('unlock_on_start', true)) {
     run('UPDATE devices SET locked=0');
@@ -447,6 +466,7 @@ function endSession(id) {
   for (const st of studentsOf(s.class_id)) run("INSERT OR IGNORE INTO attendance(session_id,student_id,status) VALUES(?,?,'absent')", id, st.id);
   io.to('class:' + s.class_id).emit('session', null);
   io.to('devices').emit('lab:mode', { mode: 'none' });
+  emitDeviceAi();
   closeKiosksAfterLesson();
 }
 // Кіоск запускається вручну (через Veyon) — після уроку закриваємо його на всіх ПК, щоб звільнити їх для інших вчителів
@@ -462,6 +482,7 @@ app.post('/api/sessions/:id/cancel', auth, teacher, h(req => {
   run("UPDATE sessions SET status='cancelled', cancel_reason=?, mode='work', ended_at=CURRENT_TIMESTAMP WHERE id=?", req.body.reason || 'Повітряна тривога', s.id);
   io.to('class:' + s.class_id).emit('session', null);
   io.to('devices').emit('lab:mode', { mode: 'none' });
+  emitDeviceAi();
   closeKiosksAfterLesson();
   for (const st of studentsOf(s.class_id)) notifyStudent(st.id, `Урок «${get('SELECT title FROM lessons WHERE id=?', s.lesson_id)?.title}» не завершено (${req.body.reason || 'тривога'}). Можна виконати вдома — прогрес збережено.`, `#/lesson/${s.lesson_id}`);
   return { ok: true };
@@ -501,7 +522,8 @@ app.get('/api/sessions/:id/live', auth, teacher, h(req => {
   for (const f of finishes) f.files = all('SELECT id, name, size FROM student_files WHERE submission_id=?', f.id);
   const links = all('SELECT * FROM session_links WHERE session_id=? ORDER BY id DESC', s.id);
   const kiosks = Object.fromEntries(all('SELECT id, computer_no, locked, name FROM devices').map(d => [d.computer_no, { online: deviceSockets.has(d.id), locked: !!d.locked, name: d.name }]));
-  return { session: s, lesson, students, help, finishes, links, kiosks, closeKiosk: setting('close_kiosk_on_end', true), computers: s.computers || setting('computers', 10) };
+  s.ai = aiPolicyOf(s);
+  return { session: s, lesson, students, help, finishes, links, kiosks, ai_levels: AI.LEVELS, closeKiosk: setting('close_kiosk_on_end', true), computers: s.computers || setting('computers', 10) };
 }));
 
 // Змінити кількість комп'ютерів посеред уроку (зламався ПК тощо)
@@ -582,6 +604,16 @@ app.post('/api/sessions/:id/mode', auth, teacher, h(req => {
   io.to('class:' + s.class_id).emit('mode', { session_id: s.id, mode, demo });
   io.to('devices').emit('lab:mode', { mode, session_id: s.id });
   return { ok: true };
+}));
+// Дозволити / заборонити ШІ прямо під час уроку
+app.post('/api/sessions/:id/ai', auth, teacher, h(req => {
+  const s = get('SELECT * FROM sessions WHERE id=?', req.params.id);
+  if (!s) bad('Заняття не знайдено');
+  const policy = AI.norm(req.body.policy);
+  run('UPDATE sessions SET ai_policy=? WHERE id=?', policy, s.id);
+  io.to('class:' + s.class_id).emit('ai', { session_id: s.id, policy, info: AI.LEVELS[policy] });
+  if (s.status === 'active') emitDeviceAi();
+  return { ok: true, policy };
 }));
 app.get('/api/sessions/:id/demo', auth, h(req => {
   const s = get('SELECT id, class_id, mode, demo FROM sessions WHERE id=?', req.params.id);
@@ -1053,13 +1085,14 @@ app.post('/api/notifications/read', auth, h(req => { run('UPDATE notifications S
 // ======================================================================
 // Налаштування, кіоск-пристрої, коди розблокування
 // ======================================================================
-app.get('/api/settings', auth, teacher, h(() => ({ computers: setting('computers', 10), blocked_apps: setting('blocked_apps', []), unlock_ttl: setting('unlock_ttl', 15), close_kiosk_on_end: setting('close_kiosk_on_end', true), unlock_on_start: setting('unlock_on_start', true), apps_text: setting('allowed_apps_text', Apps.DEFAULT_APPS_TEXT) })));
+app.get('/api/settings', auth, teacher, h(() => ({ computers: setting('computers', 10), blocked_apps: setting('blocked_apps', []), unlock_ttl: setting('unlock_ttl', 15), close_kiosk_on_end: setting('close_kiosk_on_end', true), unlock_on_start: setting('unlock_on_start', true), apps_text: setting('allowed_apps_text', Apps.DEFAULT_APPS_TEXT), ai_services_text: setting('ai_services_text', AI.DEFAULT_SERVICES_TEXT) })));
 app.put('/api/settings', auth, teacher, h(req => {
   const b = req.body;
   if (b.computers != null) setSetting('computers', Math.max(1, Math.min(60, parseInt(b.computers, 10) || 1)));
   if (typeof b.apps_text === 'string') setSetting('allowed_apps_text', b.apps_text.trim() || Apps.DEFAULT_APPS_TEXT);
   if (Array.isArray(b.blocked_apps)) setSetting('blocked_apps', b.blocked_apps.map(s => s.trim().toLowerCase()).filter(Boolean));
   if (Array.isArray(b.blocked_apps) || typeof b.apps_text === 'string') io.to('devices').emit('policy', { blocked_apps: setting('blocked_apps'), apps: appsList() });
+  if (typeof b.ai_services_text === 'string') { setSetting('ai_services_text', b.ai_services_text.trim() || AI.DEFAULT_SERVICES_TEXT); emitDeviceAi(); }
   if (b.close_kiosk_on_end != null) setSetting('close_kiosk_on_end', !!b.close_kiosk_on_end);
   if (b.unlock_on_start != null) setSetting('unlock_on_start', !!b.unlock_on_start);
   if (b.unlock_ttl != null) setSetting('unlock_ttl', Math.max(1, parseInt(b.unlock_ttl, 10) || 15));
@@ -1210,7 +1243,7 @@ app.post('/api/device/unlock', h(req => {
 app.get('/api/device/state', h(req => {
   const d = deviceByKey(req.query.key); if (!d) bad('Пристрій не зареєстровано');
   const s = get("SELECT id, mode FROM sessions WHERE status='active' ORDER BY id DESC LIMIT 1");
-  return { locked: !!d.locked, computer_no: d.computer_no, mode: s ? s.mode : 'none', session_id: s?.id || null, blocked_apps: setting('blocked_apps', []), apps: appsList() };
+  return { locked: !!d.locked, computer_no: d.computer_no, mode: s ? s.mode : 'none', session_id: s?.id || null, blocked_apps: setting('blocked_apps', []), apps: appsList(), ai: deviceAi() };
 }));
 
 // ======================================================================

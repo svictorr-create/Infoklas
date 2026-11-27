@@ -320,8 +320,18 @@ async function lessonEditor(id) {
       <button class="btn" id="adds">+ Крок</button>
     </section>
     <section class="card">
+      <h3>🛠 Умови практичної роботи</h3>
+      <label>🤖 Використання штучного інтелекту (ChatGPT, Gemini, Copilot…)
+        <select id="aip">${[['deny', '🚫 Заборонено — кіоск блокує сайти й програми ШІ'], ['help', '💡 Лише для пояснень і перевірки (не готові відповіді)'], ['allow', '✅ Дозволено — учень вказує, як використовував']].map(([v, t]) => `<option value="${v}" ${(l.ai_policy || 'deny') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <p class="hint">Учень бачить правило над інструкцією. Змінити його можна й під час уроку (кнопка 🤖 на сторінці уроку). Якщо ШІ дозволено, учень отримує кнопки ШІ-сервісів (список — у ⚙️) і наприкінці пише, як ними користувався.</p>
+      <h4>🔗 Посилання для роботи</h4>
+      <div class="mat-ed">${l.materials.filter(m => m.kind === 'worklink').map(m => `<div class="mat-row"><span>🔗 <a href="${esc(m.url)}" target="_blank">${esc(m.title)}</a> <small class="muted">${esc(m.url)}</small></span><button class="btn sm ghost" data-delm="${m.id}">🗑</button></div>`).join('') || '<p class="muted">Немає. Наприклад: таблиця Юнікоду, онлайн-редактор, тренажер.</p>'}</div>
+      <form id="wlf" class="row wrap"><input name="url" placeholder="https://… (адреса сайту)" required><input name="title" placeholder="Назва, напр. «Таблиця Юнікоду»"><button class="btn">+ Посилання для роботи</button></form>
+      <p class="hint">Учні бачать ці посилання кнопками в розділі «📂 Моя робоча папка». У кіоску сайт відкривається в окремому вікні (браузери під час уроку заблоковані), а крок інструкції стає поверх нього.</p>
+    </section>
+    <section class="card">
       <h3>📎 Матеріали: презентація, відео, зображення, файли</h3>
-      <div class="mat-ed">${l.materials.map(m => `<div class="mat-row"><span>${{ presentation: '📽', card: '📋', video: '🎬', image: '🖼', file: '📎', link: '🔗', workfile: '📂' }[m.kind] || '📎'} <a href="${esc(m.url)}" target="_blank">${esc(m.title)}</a></span><button class="btn sm ghost" data-delm="${m.id}">🗑</button></div>`).join('') || '<p class="muted">Немає матеріалів</p>'}</div>
+      <div class="mat-ed">${l.materials.filter(m => m.kind !== 'worklink').map(m => `<div class="mat-row"><span>${{ presentation: '📽', card: '📋', video: '🎬', image: '🖼', file: '📎', link: '🔗', workfile: '📂' }[m.kind] || '📎'} <a href="${esc(m.url)}" target="_blank">${esc(m.title)}</a></span><button class="btn sm ghost" data-delm="${m.id}">🗑</button></div>`).join('') || '<p class="muted">Немає матеріалів</p>'}</div>
       <form id="upf" class="row wrap">
         <select name="kind"><option value="">Тип: авто</option><option value="presentation">📽 Презентація (PDF — для демонстрації)</option><option value="card">📋 Інструкційна картка</option><option value="video">🎬 Відео</option><option value="image">🖼 Зображення</option><option value="file">📎 Файл (лише для перегляду)</option><option value="workfile">📂 Файл для роботи — копіюється в папку учня</option></select>
         <input name="title" placeholder="Назва (необов'язково)"><input type="file" name="file" required>
@@ -414,10 +424,15 @@ async function lessonEditor(id) {
     r.steps.forEach(t => steps.push(splitMedia(t))); drawSteps();
     toast(`Імпортовано ${r.steps.length} кроків. Не забудьте зберегти!`);
   };
-  const collect = () => ({ title: $('#t').value, objectives: $('#ob').value, why: $('#wh').value, success_criteria: $('#sc').value, theory: $('#th').value, homework: $('#hw').value, steps: steps.map(s => ({ id: s.id, text: joinMedia(s) })), questions_text: $('#qs').value });
+  const collect = () => ({ ai_policy: $('#aip').value, title: $('#t').value, objectives: $('#ob').value, why: $('#wh').value, success_criteria: $('#sc').value, theory: $('#th').value, homework: $('#hw').value, steps: steps.map(s => ({ id: s.id, text: joinMedia(s) })), questions_text: $('#qs').value });
   $('#save').onclick = async () => { await put('/lessons/' + id, collect()); toast('Урок збережено ✓'); const fresh = await api('/lessons/' + id); steps = fresh.steps.map(s => ({ id: s.id, ...splitMedia(s.text) })); drawSteps(); };
   $('#dl').onclick = async () => { if (confirm('Видалити урок?')) { await del('/lessons/' + id); location.hash = '#/course/' + l.course_id; } };
   $('#upf').onsubmit = async e => { e.preventDefault(); await put('/lessons/' + id, collect()); await api(`/lessons/${id}/materials`, { body: new FormData(e.target) }); toast('Завантажено'); render(); };
+  $('#wlf').onsubmit = async e => {
+    e.preventDefault(); const f = new FormData(e.target); let url = String(f.get('url')).trim();
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    await put('/lessons/' + id, collect()); await api(`/lessons/${id}/materials`, { body: { url, title: f.get('title') || url.replace(/^https?:\/\//, ''), kind: 'worklink' } }); toast('Посилання додано'); render();
+  };
   $('#lnk').onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target); await put('/lessons/' + id, collect()); await api(`/lessons/${id}/materials`, { body: { url: f.get('url'), title: f.get('title'), kind: 'link' } }); render(); };
   $$('[data-delm]').forEach(b => b.onclick = async () => { if (confirm('Видалити матеріал?')) { await del('/materials/' + b.dataset.delm); render(); } });
 }
@@ -447,6 +462,7 @@ async function livePage(id) {
       <button class="btn" id="rot">🔄 Поміняти ролі</button>
       <button class="btn" id="unl">🔓 Розблокувати ПК</button>
       <button class="btn" id="url">🔗 Відкрити посилання</button>
+      <button class="btn ai-btn ai-${L.session.ai}" id="aib" title="Використання штучного інтелекту на цьому уроці">${L.ai_levels[L.session.ai].icon} ${esc(L.ai_levels[L.session.ai].label)}</button>
       <button class="btn" id="pushf">📤 Файли учням</button>
       ${L.lesson ? `<a class="btn ghost" href="/api/lessons/${L.lesson.id}/results.zip?class_id=${s.class_id}" title="Усі файли й знімки екрана, по папках учнів">⬇ Роботи (ZIP)</a>` : ''}
       <span class="hint" id="kiosk-sum"></span>
@@ -629,6 +645,15 @@ async function livePage(id) {
     };
     $('#rot').onclick = async () => { await api(`/sessions/${id}/seating/rotate`, { body: {} }); toast('Ролі змінено — учні побачать сповіщення'); refresh(); };
     $('#url').onclick = linkDialog;
+    $('#aib').onclick = () => {
+      const m = modal(`<h3>🤖 Штучний інтелект на цьому уроці</h3>
+        <p class="muted">Діє одразу на всіх ПК класу. Типове правило задається в налаштуваннях уроку.</p>
+        ${Object.entries(L.ai_levels).map(([k, v]) => `<button class="btn big ${L.session.ai === k ? 'primary' : ''} ai-opt" data-aiv="${k}"><b>${v.icon} ${esc(v.label)}</b><br><small>${esc(v.hint)}</small></button>`).join('')}`);
+      $$('[data-aiv]', m.el).forEach(b => b.onclick = async () => {
+        await api(`/sessions/${id}/ai`, { body: { policy: b.dataset.aiv } });
+        m.close(); toast(`${L.ai_levels[b.dataset.aiv].icon} ${L.ai_levels[b.dataset.aiv].label} — учні бачать нове правило`); render();
+      });
+    };
     $('#pushf').onclick = filesDialog;
     $('#unl').onclick = async () => { await api('/devices/command', { body: { cmd: 'unlock' } }); toast('Команду розблокування надіслано всім ПК'); };
     $('#end').onclick = async () => { if (!confirm('Завершити урок? Хто не відмічений — буде записаний як відсутній.' + (L.closeKiosk ? '\nКіоски на всіх ПК закриються.' : ''))) return; stopScreenShare(); await api(`/sessions/${id}/end`, { body: {} }); render(); };
@@ -1066,6 +1091,9 @@ async function settingsPage() {
       <label>🧰 Програми для практичних робіт — кнопки в кіоску учня (показуються лише встановлені на ПК).
         <small class="muted">Формат рядка: <code>іконка Назва | команда Windows; запасна | команда Linux</code>. Команда — назва .exe або повний шлях, далі параметри. Очистіть поле й збережіть — повернеться стандартний список.</small>
         <textarea id="apps" rows="8" class="mono">${esc(s.apps_text)}</textarea></label>
+      <label>🤖 ШІ-сервіси — кнопки для учнів, коли ШІ на уроці дозволено. Коли заборонено — кіоск блокує ці та інші відомі сайти ШІ.
+        <small class="muted">Формат рядка: <code>іконка Назва | https://адреса</code>. Порожнє поле + «Зберегти» — стандартний список.</small>
+        <textarea id="aisvc" rows="4" class="mono">${esc(s.ai_services_text)}</textarea></label>
       <label>Термін дії одноразового коду, хв<input type="number" id="ttl" value="${s.unlock_ttl}"></label>
       <label class="switch"><input type="checkbox" id="uos" ${s.unlock_on_start ? 'checked' : ''}> Розблоковувати кіоски, коли я натискаю «▶ Почати урок»</label><br><br>
       <label class="switch"><input type="checkbox" id="cke" ${s.close_kiosk_on_end ? 'checked' : ''}> Після «🏁 Завершити урок»: кіоск з автозапуску (обліковий запис <code>uchen</code>) <b>блокується</b>, запущений вручну через Veyon — <b>закривається</b></label><br><br>
@@ -1077,7 +1105,7 @@ async function settingsPage() {
       <div class="row wrap"><button class="btn" id="app-srv">✏️ Змінити адресу сервера</button><button class="btn ghost" id="app-rl">🔄 Перезавантажити</button></div></section>` : ''}
     <section class="card"><h3>Пароль вчителя</h3>
       <div class="row wrap"><input type="password" id="op" placeholder="Старий пароль"><input type="password" id="np" placeholder="Новий пароль"><button class="btn" id="cp">Змінити</button></div></section>`, '#/settings');
-  $('#sv').onclick = async () => { await put('/settings', { computers: +$('#pcs').value, blocked_apps: $('#ba').value.split('\n'), unlock_ttl: +$('#ttl').value, close_kiosk_on_end: $('#cke').checked, unlock_on_start: $('#uos').checked, apps_text: $('#apps').value }); toast('Збережено'); };
+  $('#sv').onclick = async () => { await put('/settings', { computers: +$('#pcs').value, blocked_apps: $('#ba').value.split('\n'), unlock_ttl: +$('#ttl').value, close_kiosk_on_end: $('#cke').checked, unlock_on_start: $('#uos').checked, apps_text: $('#apps').value, ai_services_text: $('#aisvc').value }); toast('Збережено'); };
   $('#svpc').onclick = () => { localStorage.setItem('pcNo', $('#pcno').value); toast('Цей браузер тепер — ПК ' + $('#pcno').value); };
   $('#clpc').onclick = () => { localStorage.removeItem('pcNo'); $('#pcno').value = ''; toast('Номер ПК очищено'); };
   $('#app-srv')?.addEventListener('click', () => InfoKlasApp.changeServer());

@@ -11,7 +11,7 @@
  *  - у режимі практичної — дозволяє інші програми, а крок інструкції показує маленьким вікном поверх усіх вікон;
  *  - робить знімок екрана, коли учень тисне «Я закінчив».
  */
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -65,6 +65,13 @@ let labMode = 'none';    // режим уроку від сервера
 let allowQuit = false;
 let blockedApps = [];
 let serverApps = [];   // програми для практичних робіт (з налаштувань вчителя)
+let ai = { block: false, hosts: [], apps: [] };   // правило ШІ на поточному уроці
+const isAiUrl = u => {
+  if (!ai.block || !/^https?:/i.test(u)) return false;
+  try { const h = new URL(u).hostname.toLowerCase().replace(/^www\./, ''); return ai.hosts.some(x => h === x || h.endsWith('.' + x)); } catch { return false; }
+};
+const AI_BLOCKED_PAGE = 'data:text/html;charset=utf-8,' + encodeURIComponent(`<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:90vh;text-align:center;background:#fff7f7">
+  <div><div style="font-size:72px">🚫🤖</div><h1>На цьому уроці ШІ заборонено</h1><p style="font-size:20px">Вчитель вирішив, що цю роботу треба виконати самостійно.<br>Закрий це вікно і повертайся до інструкції.</p></div>`);
 let socket = null;
 
 // ---------- HOTP для офлайн-розблокування ----------
@@ -102,7 +109,8 @@ function createWindow() {
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file:') && !url.startsWith(cfg.server || '#')) e.preventDefault(); });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith(cfg.server)) return { action: 'allow', overrideBrowserWindowOptions: { alwaysOnTop: layout !== 'work', autoHideMenuBar: true } };
-    if (labMode === 'work' || labMode === 'none') shell.openExternal(url);
+    // Зовнішні посилання (матеріали уроку) — у вікні кіоску: браузери під час уроку заблоковані
+    if (/^https?:/i.test(url) && !mustHoldFocus()) openUrlWindow({ id: 'ext', url });
     return { action: 'deny' };
   });
   win.once('ready-to-show', () => win.show());
@@ -162,7 +170,7 @@ function connect() {
     socket.emit('device:locked', locked);
     try {
       const r = await fetch(`${cfg.server}/api/device/state?key=${cfg.key}`).then(r => r.json());
-      blockedApps = r.blocked_apps || []; serverApps = r.apps || []; labMode = r.mode || 'none';
+      blockedApps = r.blocked_apps || []; serverApps = r.apps || []; labMode = r.mode || 'none'; if (r.ai) ai = r.ai;
       if (!locked) applyLayout(layout);
     } catch {}
   });
@@ -174,6 +182,7 @@ function connect() {
     allowQuit = true; app.quit();
   });
   socket.on('policy', p => { blockedApps = p.blocked_apps || []; if (p.apps) serverApps = p.apps; });
+  socket.on('ai:policy', p => { ai = p || ai; if (ai.block) closeAiWindows(); });
   socket.on('lab:mode', m => {
     labMode = m.mode || 'none';
     if (locked) return;
@@ -183,10 +192,11 @@ function connect() {
 
 // ---------- Заборонені програми (Windows і Linux) ----------
 function enforceApps() {
-  if (!blockedApps.length) return;
+  const names = ai.block && labMode !== 'none' ? [...blockedApps, ...(ai.apps || [])] : blockedApps;
+  if (!names.length) return;
   if (!locked && labMode === 'none') return; // поза уроком ПК вільний
   platform.processes(list => {
-    const found = platform.findBlocked(list, blockedApps);
+    const found = platform.findBlocked(list, names);
     const reported = new Set();
     for (const p of found) {
       platform.kill(p);
@@ -309,9 +319,10 @@ ipcMain.handle('kiosk:open-file', async (e, { student, lesson, name }) => {
 
 // ---------- Посилання від вчителя (тест тощо) — відкриваються у вікні кіоску ----------
 const urlWins = new Map();
-ipcMain.on('kiosk:open-url', (e, { id, url, lock, title }) => {
+function openUrlWindow({ id, url, lock, title }) {
   if (!/^https?:\/\//i.test(url || '')) return;
   urlWins.get(id)?.destroy();
+  if (isAiUrl(url)) url = AI_BLOCKED_PAGE;
   const w = new BrowserWindow({
     width: 1200, height: 800, title: title || url, autoHideMenuBar: true, show: false,
     kiosk: !!lock, fullscreen: !!lock, alwaysOnTop: !!lock, closable: !lock, minimizable: !lock,
@@ -329,7 +340,12 @@ ipcMain.on('kiosk:open-url', (e, { id, url, lock, title }) => {
   w.on('closed', () => urlWins.delete(id));
   w.loadURL(url);
   urlWins.set(id, w);
-});
+}
+ipcMain.on('kiosk:open-url', (e, o) => openUrlWindow(o || {}));
+// ШІ заборонили посеред уроку — вікна з сайтами ШІ показують сторінку-заборону
+function closeAiWindows() {
+  for (const w of urlWins.values()) { try { if (!w.isDestroyed() && isAiUrl(w.webContents.getURL())) w.loadURL(AI_BLOCKED_PAGE); } catch {} }
+}
 ipcMain.on('kiosk:close-url', (e, { id }) => {
   for (const [k, w] of urlWins) if (!id || k === id) { w.allowClose = true; w.destroy(); }
 });
@@ -338,6 +354,12 @@ ipcMain.on('kiosk:close-url', (e, { id }) => {
 if (!autostartArg && !hasArg('--restore-keys')) app.whenReady().then(() => {
   // Перехоплюємо системні комбінації, які можна перехопити (Alt+Tab/Ctrl+Alt+Del — див. README про політики Windows)
   ['CommandOrControl+Esc', 'Alt+F4', 'F11', 'CommandOrControl+Shift+Esc'].forEach(k => { try { globalShortcut.register(k, () => {}); } catch {} });
+  // Коли ШІ заборонено — сайти ШІ не відкриваються в жодному вікні кіоску (і не вбудовуються в сторінки)
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (d, cb) => {
+    if (!isAiUrl(d.url)) return cb({});
+    if (d.resourceType === 'mainFrame') return cb({ redirectURL: AI_BLOCKED_PAGE });
+    cb({ cancel: true });
+  });
   createWindow();
   if (!cfg.key || !cfg.server) win.loadFile(path.join(__dirname, 'setup.html'));
   else { connect(); if (START_OPEN) showApp(); else showLock(); }

@@ -372,3 +372,13 @@ pre.cmd { background: #1d2433; color: #e9ecf3; padding: 10px 12px; border-radius
 .note-item { padding: 6px 0; border-bottom: 1px solid #eee; } .note-item:last-child { border: 0; }
 .note-text { white-space: pre-wrap; font-size: .92em; }
 .journal .note-mark { font-size: .7em; }
+
+/* 🤖 Правило ШІ */
+.ai-rule { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-radius: 10px; margin: 6px 0 10px; border: 1px solid; }
+.ai-rule .ai-ic { font-size: 1.6em; line-height: 1; }
+.ai-rule.ai-deny { background: #fff1f1; border-color: #f3c2c2; }
+.ai-rule.ai-help { background: #fff9e6; border-color: #f0dc9a; }
+.ai-rule.ai-allow { background: #eefaf0; border-color: #b9e4c2; }
+.ai-svc { margin-top: 6px; }
+.ai-btn.ai-deny { border-color: #e7a3a3; } .ai-btn.ai-allow { border-color: #9fd7ad; } .ai-btn.ai-help { border-color: #e9cf7c; }
+.ai-opt { display: block; width: 100%; text-align: left; margin: 6px 0; white-space: normal; }

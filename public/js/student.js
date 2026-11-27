@@ -24,6 +24,7 @@ export function onStudentSocket(s) {
   s.on('session', () => { if (['#/', ''].includes(location.hash)) render(); else if (cur) reloadLesson(); });
   s.on('seat', r => { toast(`Твоє місце: ПК ${r.computer_no}, ${r.role === 'driver' ? '⌨️ ти за клавіатурою' : '🧭 ти штурман (підказуєш і перевіряєш)'}`, 'info', 8000); if (cur) reloadLesson(); });
   s.on('group:changed', () => cur && reloadLesson());
+  s.on('ai', d => { toast(`${d.info.icon} ${d.info.label}`, d.policy === 'deny' ? 'err' : 'info', 7000); if (cur) reloadLesson(); });
   s.on('progress', ({ step_id, done }) => {
     if (!cur) return;
     const st = cur.steps.find(x => x.id === step_id);
@@ -156,6 +157,7 @@ async function lessonPage(id) {
           <button class="btn sm" id="pin">📌 Поверх усіх вікон</button>
         </div>
       </div>
+      <div id="aibox"></div>
       <div class="progress"><div id="pbar"></div><span id="ptext"></span></div>
       <div id="steps"></div>
     </section>
@@ -170,6 +172,7 @@ async function lessonPage(id) {
   });
   drawSteps();
   drawWork();
+  drawAi();
   let sync = null;
   if (state.kiosk?.folder) {
     prepareFolder().then(drawWork).catch(e => console.warn(e));
@@ -182,7 +185,28 @@ async function reloadLesson() {
   if (!cur) return;
   const id = cur.id;
   const fresh = await api('/lessons/' + id);
-  if (cur?.id === id) { fresh.folderPath = cur.folderPath; cur = fresh; if (location.hash.startsWith('#/mini/')) drawMini(); else { drawSteps(); drawWork(); } }
+  if (cur?.id === id) { fresh.folderPath = cur.folderPath; cur = fresh; if (location.hash.startsWith('#/mini/')) drawMini(); else { drawSteps(); drawWork(); drawAi(); } }
+}
+
+// Відкрити сайт: у кіоску — у його вікні (браузери під час уроку заблоковані), інакше — у новій вкладці
+function openSite(url, title, id) {
+  if (state.kiosk?.openUrl) state.kiosk.openUrl({ id: id || 'site-' + url, url, title });
+  else window.open(url, '_blank', 'noopener');
+}
+// Посилання з матеріалів уроку в кіоску теж відкриваються у вікні кіоску
+document.addEventListener('click', e => {
+  const a = e.target.closest?.('a.mat-link');
+  if (!a || !state.kiosk?.openUrl || !/^https?:/i.test(a.getAttribute('href') || '')) return;
+  e.preventDefault(); openSite(a.href, a.textContent.trim());
+});
+
+// 🤖 Правило використання ШІ на цьому уроці
+function drawAi() {
+  const box = $('#aibox'); if (!box || !cur?.ai_info) return;
+  const i = cur.ai_info, svc = cur.ai_services || [];
+  box.innerHTML = `<div class="ai-rule ai-${cur.ai}"><span class="ai-ic">${i.icon}</span><div><b>${esc(i.label)}</b><div class="small">${esc(i.hint)}</div>
+    ${svc.length ? `<div class="row wrap ai-svc">${svc.map(s => `<button class="btn sm" data-ai="${esc(s.id)}">${esc(s.icon)} ${esc(s.name)}</button>`).join('')}</div>` : ''}</div></div>`;
+  $$('[data-ai]', box).forEach(b => b.onclick = () => { const s = svc.find(x => x.id === b.dataset.ai); openSite(s.url, s.name, 'ai'); });
 }
 
 function materialHtml(m) {
@@ -357,6 +381,8 @@ function drawWork() {
       <div class="apps-bar">${appsCache.map(a => `<button class="btn app-btn" data-app="${esc(a.id)}"><span class="app-ic">${esc(a.icon)}</span>${esc(a.name)}</button>`).join('')}</div>` : ''}
     ${wf.length ? `<p><b>Файли для роботи</b> ${kiosk ? '<span class="muted small">— уже скопійовані у твою папку</span>' : '<span class="muted small">— завантаж і відкрий</span>'}</p>
       <div class="files">${wf.map(m => kiosk ? `<span class="file">📄 ${esc(workName(m))} ${state.kiosk?.apps ? `<button class="btn sm primary" data-openf="${esc(workName(m))}">Відкрити</button>` : ''}</span>` : `<a class="file" href="${esc(m.url)}" download="${esc(workName(m))}">⬇ ${esc(workName(m))}</a>`).join('')}</div>` : ''}
+    ${(cur.worklinks || []).length ? `<p><b>🔗 Посилання для роботи</b> <span class="muted small">— сайти, потрібні для цієї роботи</span></p>
+      <div class="apps-bar">${cur.worklinks.map(k => `<button class="btn app-btn" data-wl="${k.id}" title="${esc(k.url)}"><span class="app-ic">🔗</span>${esc(k.title || k.url)}</button>`).join('')}</div>` : ''}
     <p><b>Мої результати</b> ${mine.length ? '' : '<span class="muted small">— ще нічого не надіслано</span>'}</p>
     ${mine.length ? `<div class="files">${mine.map(f => `<span class="file ${f.submission_id ? 'done' : ''}">${f.submission_id ? '✅' : '📤'} <a href="/api/files/${f.id}">${esc(f.name)}</a> <small>${fmtSize(f.size)}${f.author !== state.user.name ? ' · ' + esc(f.author) : ''}</small>
       ${!f.submission_id && f.author === state.user.name ? `<button class="x" data-delfile="${f.id}" title="Прибрати">✕</button>` : ''}</span>`).join('')}</div>` : ''}
@@ -372,6 +398,10 @@ function drawWork() {
     const r = await state.kiosk.apps.launch({ id: b.dataset.app });
     if (r?.ok) { toast(`${b.textContent.trim()} запускається… Крок інструкції — поверх вікон`, 'ok', 4000); setTimeout(pinSteps, 1200); }
     else toast('Не вдалося запустити програму', 'err');
+  });
+  $$('[data-wl]', box).forEach(b => b.onclick = () => {
+    const k = cur.worklinks.find(x => x.id === +b.dataset.wl);
+    openSite(k.url, k.title, 'wl-' + k.id);
   });
   $$('[data-openf]', box).forEach(b => b.onclick = async () => {
     await prepareFolder();
@@ -415,12 +445,17 @@ function drawFinish() {
       <div class="self">${crit.map((c, i) => `<div class="self-row"><span>${esc(c)}</span>
         <span class="tl" data-i="${i}"><button data-v="2" title="Можу">🟢</button><button data-v="1" title="Не впевнений">🟡</button><button data-v="0" title="Ще не можу">🔴</button></span></div>`).join('')}</div>` : ''}
     <label>Що було найскладніше? Що нового дізнався? <textarea id="refl" rows="2"></textarea></label>
+    ${cur.ai && cur.ai !== 'deny' ? `<label>🤖 Як ти використовував ШІ? <span class="muted small">(який сервіс і для чого; якщо не використовував — так і напиши)</span><textarea id="aiuse" rows="2"></textarea></label>` : ''}
     <button class="btn big primary" id="fin" ${ready ? '' : 'disabled'}>✅ Я закінчив — надіслати вчителю</button>
     <p class="hint">Буде зроблено знімок екрана з твоїм результатом.</p></div>`;
   const sa = {};
   $$('.tl', box).forEach(t => $$('button', t).forEach(b => b.onclick = () => { sa[crit[t.dataset.i]] = +b.dataset.v; $$('button', t).forEach(x => x.classList.toggle('on', x === b)); }));
   const fin = $('#fin');
-  if (fin) fin.onclick = () => finishWork(sa, $('#refl').value);
+  if (fin) fin.onclick = () => {
+    const aiuse = $('#aiuse')?.value.trim();
+    if ($('#aiuse') && !aiuse) { toast('Напиши, як ти використовував ШІ (або що не використовував)', 'err'); $('#aiuse').focus(); return; }
+    finishWork(sa, [$('#refl').value.trim(), aiuse ? '🤖 ШІ: ' + aiuse : ''].filter(Boolean).join('\n'));
+  };
 }
 
 export async function captureScreen() {

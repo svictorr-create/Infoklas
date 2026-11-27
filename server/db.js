@@ -196,6 +196,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS teacher_notes (
   lesson_id INTEGER REFERENCES lessons(id) ON DELETE CASCADE,
   text TEXT NOT NULL, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (student_id, lesson_id))`);
+// Міграція: правило використання ШІ (урок — типове, заняття — змінене вчителем під час уроку)
+if (!all('PRAGMA table_info(lessons)').some(c => c.name === 'ai_policy')) db.exec("ALTER TABLE lessons ADD COLUMN ai_policy TEXT DEFAULT 'deny'");
+if (!all('PRAGMA table_info(sessions)').some(c => c.name === 'ai_policy')) db.exec('ALTER TABLE sessions ADD COLUMN ai_policy TEXT');
 if (setting('computers') == null) setSetting('computers', 10);
 const LINUX_APPS = ['chrome', 'chromium', 'chromium-browser', 'firefox', 'firefox-bin', 'opera', 'brave', 'vivaldi-bin', 'yandex_browser',
   'steam', 'discord', 'telegram-desktop', 'minetest', 'supertuxkart'];
